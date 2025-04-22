@@ -19,9 +19,20 @@ from scheduler import WarmupCosineSchedule
 
 import argparse
 
+def get_troch_dataset(name):
+    if name == "eav":
+        return EAVDataset
+    elif name == "emo":
+        return EmognitionDataset
+    elif name == "mdm":
+        return MDMERDataset
+    else:
+        raise Exception("Wrong dataset name")
+
 
 def run(
     epochs,
+    dataset,
     batch_size,
     learning_rate,
     weight_decay,
@@ -49,14 +60,14 @@ def run(
          )]
     )
 
-    training_dataset = EAVDataset(
+    training_dataset = dataset(
         csv_file=csv_file,
         time_window = 5.0, #sec
         video_transform=video_preprocessor,
         eeg_transform = AbsFFT(dim=-2),
         split = "train"
     )
-    validation_dataset = EAVDataset(
+    validation_dataset = dataset(
         csv_file=csv_file,
         time_window = 5.0, #sec
         video_transform=video_preprocessor,
@@ -151,6 +162,7 @@ if "__main__" == __name__:
     parser.add_argument("--csv_file", type=str, required=True)
     parser.add_argument("--checkpoint_dir", type=str, required=True)
     parser.add_argument("--experiment_name", type=str, required=True)
+    parser.add_argument("--dataset_name", type=str, required=True)
 
     args = parser.parse_args()
 
@@ -162,9 +174,13 @@ if "__main__" == __name__:
     csv_file = args.csv_file
     experiment_name = args.experiment_name
     checkpoint_dir =args.checkpoint_dir
+    dataset_name = args.dataset_name
+
+    dataset = get_troch_dataset(dataset_name)
 
 
     run(epochs,
+        dataset,
         batch_size,
         learning_rate,
         weight_decay,

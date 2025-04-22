@@ -10,6 +10,8 @@ class VERandomDataset(Dataset):
             self,
             csv_file,
             eeg_sampling_rate,
+            eeg_channel_count,
+            output_shape,
             time_window,
             split="train",
             video_output_format = "TCHW",
@@ -34,6 +36,9 @@ class VERandomDataset(Dataset):
 
         self.video_transform = video_transform
         self.eeg_transform = eeg_transform
+
+        self.output_shape = output_shape
+        self.eeg_channel_count = eeg_channel_count
 
         df = pd.read_csv(self.csv_file)
         self.df = df[(df["data_split"] == self.split) & (df["bool_both_file"] == True)]
@@ -170,7 +175,6 @@ class EAVDataset(VERandomDataset):
             num_out_eeg = 64,
             ):
 
-        self.output_shape = (5,1)
         super(EAVDataset,self).__init__(
                 csv_file = csv_file,
                 eeg_sampling_rate = 500,
@@ -181,6 +185,8 @@ class EAVDataset(VERandomDataset):
                 eeg_transform = eeg_transform,
                 num_out_frames = num_out_frames,
                 num_out_eeg = num_out_eeg,
+                output_shape = (5,1),
+                eeg_channel_count = 30,
         )
 
 class MDMERDataset(VERandomDataset):
@@ -196,7 +202,6 @@ class MDMERDataset(VERandomDataset):
             num_out_eeg = 64,
             ):
 
-        self.output_shape = (9,3)
         super(MDMERDataset,self).__init__(
                 csv_file = csv_file,
                 eeg_sampling_rate = 300,
@@ -207,6 +212,8 @@ class MDMERDataset(VERandomDataset):
                 eeg_transform = eeg_transform,
                 num_out_frames = num_out_frames,
                 num_out_eeg = num_out_eeg,
+                output_shape = (9,3),
+                eeg_channel_count = 18,
         )
 
 class EmognitionDataset(VERandomDataset):
@@ -222,7 +229,6 @@ class EmognitionDataset(VERandomDataset):
             num_out_eeg = 64,
             ):
 
-        self.output_shape = (9,3)
         super(EmognitionDataset,self).__init__(
                 csv_file = csv_file,
                 eeg_sampling_rate = 256,
@@ -233,4 +239,6 @@ class EmognitionDataset(VERandomDataset):
                 eeg_transform = eeg_transform,
                 num_out_frames = num_out_frames,
                 num_out_eeg = num_out_eeg,
+                output_shape = (9,3),
+                eeg_channel_count = 30,
         )
