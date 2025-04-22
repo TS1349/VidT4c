@@ -112,7 +112,7 @@ def run(
     model = torch_model(
                  output_dim = training_dataset.output_shape,
                  image_size = 224,
-                 eeg_channels = 18,
+                 eeg_channels = training_dataset.eeg_channel_count,
                  frequency_bins = 64,
     )
 
