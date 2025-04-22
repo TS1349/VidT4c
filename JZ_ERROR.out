@@ -1,4 +1,0 @@
-+ srun python -u ./runner.py --epochs 300 --batch_size 64 --learning_rate 0.005 --warmup_steps 1000 --weight_decay 0.0004 --csv_file ./datasets/fold_csv_files/MDMER_fold_csv/MDMER_dataset_updated_fold0.csv --checkpoint_dir ./checkpoints --experiment_name mdmr_f0
-srun: Job step aborted: Waiting up to 62 seconds for job step to finish.
-slurmstepd: error: *** JOB 344053 ON jean-zay-iam16 CANCELLED AT 2025-04-21T17:54:59 ***
-slurmstepd: error: *** STEP 344053.0 ON jean-zay-iam16 CANCELLED AT 2025-04-21T17:54:59 ***
