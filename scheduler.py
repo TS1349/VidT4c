@@ -3,7 +3,7 @@ import math
 
 #from https://github.com/jeonsworld/ViT-pytorch/blob/main/utils/scheduler.py
 
-class WarmupCosineSchedule(LambdaLR):
+class WarmupCosineScheduler(LambdaLR):
     """ Linear warmup and then cosine decay.
         Linearly increases learning rate from 0 to 1 over `warmup_steps` training steps.
         Decreases learning rate from 1. to 0. over remaining `t_total - warmup_steps` steps following a cosine curve.
@@ -19,7 +19,7 @@ class WarmupCosineSchedule(LambdaLR):
         self.warmup_steps = warmup_steps
         self.t_total = t_total
         self.cycles = cycles
-        super(WarmupCosineSchedule, self).__init__(
+        super(WarmupCosineScheduler, self).__init__(
             optimizer,
             self.lr_lambda,
             last_epoch=last_epoch
@@ -32,26 +32,21 @@ class WarmupCosineSchedule(LambdaLR):
         progress = float(step - self.warmup_steps) / float(max(1, self.t_total - self.warmup_steps))
         return max(0.0, 0.5 * (1. + math.cos(math.pi * float(self.cycles) * 2.0 * progress)))
 
-
-class SteppedScheduler(LambdaLR):
+class CosineScheduler(LambdaLR):
     def __init__(self,
                  optimizer,
-                 epochs = [11, 14],
-                 lrs = [1, 0.1, 0.01],
-                 last_epoch = -1,
+                 t_total,
+                 cycles=.5,
+                 last_epoch=-1,
                  ):
-        self.epoch_idx = 0
-        self.epochs = epochs
-        self.lrs = lrs
-        super(SteppedScheduler, self).__init__(
+        self.t_total = t_total
+        self.cycles = cycles
+        super(CosineScheduler, self).__init__(
             optimizer,
             self.lr_lambda,
             last_epoch=last_epoch
         )
 
-
-    def lr_lambda(self,step):
-        if step >= self.epochs[self.epoch_idx]:
-            self.epoch_idx +=1
-        return self.lrs[self.epoch_idx]
-
+    def lr_lambda(self, step):
+        progress = float(step) / float(max(1, self.t_total))
+        return max(0.0, 0.5 * (1. + math.cos(math.pi * float(self.cycles) * 2.0 * progress)))

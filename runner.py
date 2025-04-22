@@ -1,31 +1,46 @@
 import idr_torch
+import torch
 from torch.distributed import init_process_group, destroy_process_group
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 
-from torchvision.transforms.v2 import Compose, Normalize, Resize, CenterCrop, ToDtype,RandomHorizontalFlip
-import os
+from torchvision.transforms.v2 import Compose, Normalize, Resize, ToDtype
 import math
-import torch
-import torch.multiprocessing as mp
 import torch.nn as nn
 import torch.optim as optim
 
 from trainer import PTrainer
-from model import BridgedTimeSFormer4C
-from dataloader import VERandomDataset, TestDataset, EAVDataset, EmognitionDataset, MDMERDataset
+from models import BridgedTimeSFormer4C, BridgedViViT4C
+from dataloader import EAVDataset, EmognitionDataset, MDMERDataset
 from dataloader.transforms import AbsFFT
-from scheduler import WarmupCosineSchedule
+from scheduler import CosineScheduler
 
 import argparse
 
+def get_torch_model(name):
+    if name == "vivit":
+        return BridgedViViT4C
+    elif name == "tsf":
+        return BridgedTimeSFormer4C
+    else:
+        raise Exception("Wrong model name")
+
+def get_torch_dataset(name):
+    if name == "mdmer":
+        return MDMERDataset
+    elif name == "emognition":
+        return EmognitionDataset
+    elif name == "eav":
+        return EAVDataset
+
 
 def run(
+    torch_model,
+    torch_dataset,
     epochs,
     batch_size,
     learning_rate,
     weight_decay,
-    warmup_steps,
     csv_file,
     experiment_name,
     checkpoint_dir,
@@ -39,9 +54,8 @@ def run(
 
 
     video_preprocessor = Compose(
-        [CenterCrop(size=(480,480)),
+        [
          Resize(size=(224,224)),
-         RandomHorizontalFlip(p=0.5), # no more
          ToDtype(torch.float32, scale=True),
          Normalize(
              mean=(0.45, 0.45, 0.45),
@@ -49,14 +63,14 @@ def run(
          )]
     )
 
-    training_dataset = MDMERDataset(
+    training_dataset = torch_dataset(
         csv_file=csv_file,
         time_window = 5.0, #sec
         video_transform=video_preprocessor,
         eeg_transform = AbsFFT(dim=-2),
         split = "train"
     )
-    validation_dataset = MDMERDataset(
+    validation_dataset = torch_model(
         csv_file=csv_file,
         time_window = 5.0, #sec
         video_transform=video_preprocessor,
@@ -95,7 +109,7 @@ def run(
         shuffle=False,
     )
 
-    model = BridgedTimeSFormer4C(
+    model = torch_model(
                  output_dim = training_dataset.output_shape,
                  image_size = 224,
                  eeg_channels = 18,
@@ -114,9 +128,8 @@ def run(
         lr=learning_rate,
         weight_decay=weight_decay
 )
-    lr_scheduler = WarmupCosineSchedule(
+    lr_scheduler = CosineScheduler(
             optimizer = optimizer,
-            warmup_steps = warmup_steps,
             t_total = total_steps,
             )
 
@@ -147,10 +160,11 @@ if "__main__" == __name__:
     parser.add_argument("--batch_size", type=int, required = True)
     parser.add_argument("--learning_rate", type=float, required = True)
     parser.add_argument("--weight_decay", type=float, required = True)
-    parser.add_argument("--warmup_steps", type=int, required=True)
     parser.add_argument("--csv_file", type=str, required=True)
     parser.add_argument("--checkpoint_dir", type=str, required=True)
     parser.add_argument("--experiment_name", type=str, required=True)
+    parser.add_argument("--dataset", type=str, required=True)
+    parser.add_argument("--model", type=str, required=True)
 
     args = parser.parse_args()
 
@@ -158,17 +172,19 @@ if "__main__" == __name__:
     batch_size = args.batch_size
     learning_rate = args.learning_rate
     weight_decay = args.weight_decay
-    warmup_steps = args.warmup_steps
     csv_file = args.csv_file
     experiment_name = args.experiment_name
-    checkpoint_dir =args.checkpoint_dir
+    checkpoint_dir =args.checkpoint_dir + r"/" + experiment_name
+    torch_model = get_torch_model(args.model)
+    torch_dataset = get_torch_dataset(args.dataset)
 
 
     run(epochs,
+        torch_model,
+        torch_dataset,
         batch_size,
         learning_rate,
         weight_decay,
-        warmup_steps,
         csv_file,
         experiment_name,
         checkpoint_dir,)

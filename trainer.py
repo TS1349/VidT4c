@@ -50,7 +50,7 @@ class PTrainer:
         )
         print(f"Epoch {self.current_epoch}: checkpoint saved at {checkpoint_path}")
 
-    def _run_batch(self, sample, batch_number):
+    def _run_batch(self, sample):
         self.optimizer.zero_grad()
         output = self.model(sample)
         loss = self.loss_function(output, sample["output"])
@@ -61,10 +61,10 @@ class PTrainer:
 
         self.optimizer.step()
         self.lr_scheduler.step()
-        print(f"TR, GPU ID : {self.gpu_id}, ST: {self.step}, BN: {batch_number}, \
-loss : {loss.item()}, lr : {self.optimizer.param_groups[0]['lr']}\
+        print(f"ST: {self.step}, lr : {self.optimizer.param_groups[0]['lr']}\
 ")
         self.step += 1
+        return loss.item()
 
     def _time_stamp(self):
         return str(math.floor(time.time()))
@@ -73,10 +73,17 @@ loss : {loss.item()}, lr : {self.optimizer.param_groups[0]['lr']}\
     def _run_epoch(self, epoch) -> None:
         self.model.train()
         self.training_dataloader.sampler.set_epoch(epoch)  # multi-gpu
+        avg_loss = 0
+        bn = 0
         for batch_number, sample in enumerate(self.training_dataloader):
             for k in sample:
                 sample[k] = sample[k].to(self.gpu, non_blocking=True)
-            self._run_batch(sample, batch_number)
+            avg_loss += self._run_batch(sample)
+            bn = batch_number
+        avg_loss /= (bn + 1)
+        print(f"TR, GPU ID : {self.gpu_id}, EP: {epoch}, \
+loss : {avg_loss}, lr : {self.optimizer.param_groups[0]['lr']}\
+")
 
             #DEBUG
             #if batch_number > 2:
