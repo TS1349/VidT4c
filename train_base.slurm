@@ -1,23 +1,23 @@
 #!/bin/bash
 
-#SBATCH --job-name="tm_mdmer_f0"
-#SBATCH -A ntk@a100                  
-#SBATCH -C a100                     
+#SBATCH --job-name="tmMDf0"
+#SBATCH -A ntk@a100
+#SBATCH -C a100
 #SBATCH --gres=gpu:8
-#SBATCH --nodes=1                  
-#SBATCH --ntasks-per-node=8     
-#SBATCH --cpus-per-task=8  
-#SBATCH --hint=nomultithread    
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=8
+#SBATCH --cpus-per-task=8
+#SBATCH --hint=nomultithread
 #SBATCH --qos=qos_gpu_a100-t3
 
-#SBATCH --time=20:00:00            
-#SBATCH --output=JZ_OUTPUT.out    
-#SBATCH --error=JZ_ERROR.out                                      
+#SBATCH --time=20:00:00
+#SBATCH --output=mdmer_tsf_out.out
+#SBATCH --error=mdmer_tsf_err.out
 
 module purge
 module load arch/a100
-module load cuda/12.1.0 
-module load cudnn/9.2.0.82-cuda 
+module load cuda/12.1.0
+module load cudnn/9.2.0.82-cuda
 module load gcc/11.3.1
 module load anaconda-py3/2024.06
 
@@ -32,9 +32,10 @@ set -x
 srun python -u ./runner.py \
         --epochs 300\
         --batch_size 64\
-        --learning_rate 0.005\
-	--warmup_steps 1000\
+        --learning_rate 0.01\
         --weight_decay 0.0004\
         --csv_file "$fold_csv"\
         --checkpoint_dir "./checkpoints"\
-        --experiment_name "mdmr_f0"
+        --experiment_name "mdmr_fold_0"\
+        --dataset "mdmer"\
+        --model "tsf:
