@@ -11,8 +11,8 @@
 #SBATCH --qos=qos_gpu_a100-dev
 
 #SBATCH --time=2:00:00
-#SBATCH --output=eav_tsf_out.out
-#SBATCH --error=eav_tsf_err.out
+#SBATCH --output=eav_vivit_out.out
+#SBATCH --error=eav_vivit_err.out
 
 module purge
 module load arch/a100

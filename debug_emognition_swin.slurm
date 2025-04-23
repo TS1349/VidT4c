@@ -11,8 +11,8 @@
 #SBATCH --qos=qos_gpu_a100-dev
 
 #SBATCH --time=2:00:00
-#SBATCH --output=emog_tsf_out.out
-#SBATCH --error=emog_tsf_err.out
+#SBATCH --output=emog_swin_out.out
+#SBATCH --error=emog_swin_err.out
 
 module purge
 module load arch/a100
