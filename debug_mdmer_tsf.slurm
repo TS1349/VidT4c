@@ -3,14 +3,14 @@
 #SBATCH --job-name="tmMDf0"
 #SBATCH -A ntk@a100
 #SBATCH -C a100
-#SBATCH --gres=gpu:8
+#SBATCH --gres=gpu:2
 #SBATCH --nodes=1
-#SBATCH --ntasks-per-node=8
+#SBATCH --ntasks-per-node=2
 #SBATCH --cpus-per-task=8
 #SBATCH --hint=nomultithread
-#SBATCH --qos=qos_gpu_a100-t3
+#SBATCH --qos=qos_gpu_a100-dev
 
-#SBATCH --time=20:00:00
+#SBATCH --time=2:00:00
 #SBATCH --output=mdmer_tsf_out.out
 #SBATCH --error=mdmer_tsf_err.out
 
@@ -30,8 +30,8 @@ fold_csv="./datasets/fold_csv_files/MDMER_fold_csv/MDMER_dataset_updated_fold0.c
 
 set -x
 srun python -u ./runner.py \
-        --epochs 200\
-        --batch_size 64\
+        --epochs 300\
+        --batch_size 16\
         --learning_rate 0.01\
         --weight_decay 0.0004\
         --csv_file "$fold_csv"\
