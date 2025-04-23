@@ -1,7 +1,7 @@
 import torch
 from torch import nn
 from einops import rearrange, repeat
-from module import Attention, PreNorm, FeedForward
+from .module import Attention, PreNorm, FeedForward
 
 # === PatchEmbed fix ===
 class PatchEmbed(nn.Module):

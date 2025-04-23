@@ -10,7 +10,7 @@ import torch.nn as nn
 import torch.optim as optim
 
 from trainer import PTrainer
-from models import BridgedTimeSFormer4C, BridgedViViT4C
+from models import BridgedTimeSFormer4C, BridgedViViT4C, BridgedVideoSwin4C
 from dataloader import EAVDataset, EmognitionDataset, MDMERDataset
 from dataloader.transforms import AbsFFT
 from scheduler import CosineScheduler
@@ -22,6 +22,8 @@ def get_torch_model(name):
         return BridgedViViT4C
     elif name == "tsf":
         return BridgedTimeSFormer4C
+    elif name == "swin":
+        return BridgedVideoSwin4C
     else:
         raise Exception("Wrong model name")
 
@@ -123,7 +125,7 @@ def run(
 
     loss_function = nn.CrossEntropyLoss()
 
-    optimizer = torch.optim.AdamW(
+    optimizer = optim.AdamW(
         params=model.parameters(),
         lr=learning_rate,
         weight_decay=weight_decay
