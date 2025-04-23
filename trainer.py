@@ -107,8 +107,8 @@ loss : {avg_loss}, lr : {self.optimizer.param_groups[0]['lr']}\
                     (predictions.argmax(1) == sample["output"]).type(torch.float).sum(0)
                 counter += 1
             #DEBUG
-             #   if counter > 2:
-             #       break
+                #if counter > 2:
+                #    break
 
             test_loss /= num_batches
             correct /= size

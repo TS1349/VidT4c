@@ -49,9 +49,9 @@ def run(
 ):
 
     init_process_group(backend='nccl',
-                        init_method='env://',
-                        world_size=idr_torch.size,
-                        rank=idr_torch.rank)
+                       init_method='env://',
+                       world_size=idr_torch.size,
+                       rank=idr_torch.rank)
 
 
 
@@ -72,7 +72,7 @@ def run(
         eeg_transform = AbsFFT(dim=-2),
         split = "train"
     )
-    validation_dataset = torch_model(
+    validation_dataset = torch_dataset(
         csv_file=csv_file,
         time_window = 5.0, #sec
         video_transform=video_preprocessor,
@@ -179,6 +179,8 @@ if "__main__" == __name__:
     checkpoint_dir =args.checkpoint_dir + r"/" + experiment_name
     torch_model = get_torch_model(args.model)
     torch_dataset = get_torch_dataset(args.dataset)
+    print(torch_dataset)
+    print(torch_model)
 
 
     run(epochs,
