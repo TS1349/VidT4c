@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name="tmEAf0"
+#SBATCH --job-name="tmEAvi0"
 #SBATCH -A ntk@a100
 #SBATCH -C a100
 #SBATCH --gres=gpu:2
@@ -36,6 +36,6 @@ srun python -u ./runner.py \
         --weight_decay 0.0004\
         --csv_file "$fold_csv"\
         --checkpoint_dir "./checkpoints"\
-        --experiment_name "eav_fold_0"\
+        --experiment_name "eav_vivit_0"\
         --dataset "eav"\
         --model "vivit"

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name="tmEMf0"
+#SBATCH --job-name="tmEMsw0"
 #SBATCH -A ntk@a100
 #SBATCH -C a100
 #SBATCH --gres=gpu:2
@@ -36,6 +36,6 @@ srun python -u ./runner.py \
         --weight_decay 0.0004\
         --csv_file "$fold_csv"\
         --checkpoint_dir "./checkpoints"\
-        --experiment_name "emognition_f0"\
+        --experiment_name "emognition_swin_0"\
         --dataset "emognition"\
         --model "swin"

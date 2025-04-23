@@ -36,7 +36,7 @@ class BridgedTimeSFormer4C(nn.Module):
             attention_type='divided_space_time',
         )
         if output_dim[1] == 1:
-            self.output_dim = (output_dim[1],)
+            self.output_dim = (output_dim[0],)
 
 
         self.image_size = image_size

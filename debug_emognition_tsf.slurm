@@ -36,6 +36,6 @@ srun python -u ./runner.py \
         --weight_decay 0.0004\
         --csv_file "$fold_csv"\
         --checkpoint_dir "./checkpoints"\
-        --experiment_name "emognition_f0"\
+        --experiment_name "emognition_tsf_0"\
         --dataset "emognition"\
         --model "tsf"

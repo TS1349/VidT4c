@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name="tmMDts0"
+#SBATCH --job-name="tmEAts0"
 #SBATCH -A ntk@a100
 #SBATCH -C a100
 #SBATCH --gres=gpu:2
@@ -11,8 +11,8 @@
 #SBATCH --qos=qos_gpu_a100-dev
 
 #SBATCH --time=2:00:00
-#SBATCH --output=mdmer_tsf_out.out
-#SBATCH --error=mdmer_tsf_err.out
+#SBATCH --output=eav_tsf_out.out
+#SBATCH --error=eav_tsf_err.out
 
 module purge
 module load arch/a100
@@ -26,16 +26,16 @@ conda activate tsf4
 export MASTER_PORT=$((12000 + $RANDOM % 20000))
 export OMP_NUM_THREADS=1
 
-fold_csv="./datasets/fold_csv_files/MDMER_fold_csv/MDMER_dataset_updated_fold0.csv"
+fold_csv="./datasets/fold_csv_files/EAV_fold_csv/EAV_dataset_updated_fold0.csv"
 
 set -x
 srun python -u ./runner.py \
-        --epochs 300\
+        --epochs 200\
         --batch_size 16\
         --learning_rate 0.01\
         --weight_decay 0.0004\
         --csv_file "$fold_csv"\
         --checkpoint_dir "./checkpoints"\
-        --experiment_name "mdmr_tsf_0"\
-        --dataset "mdmer"\
+        --experiment_name "eav_tsf_0"\
+        --dataset "eav"\
         --model "tsf"
