@@ -38,4 +38,4 @@ srun python -u ./runner.py \
         --checkpoint_dir "./checkpoints"\
         --experiment_name "mdmr_fold_0"\
         --dataset "mdmer"\
-        --model "tsf:
+        --model "tsf"
