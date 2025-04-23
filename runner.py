@@ -37,9 +37,9 @@ def get_torch_dataset(name):
 
 
 def run(
+    epochs,
     torch_model,
     torch_dataset,
-    epochs,
     batch_size,
     learning_rate,
     weight_decay,
