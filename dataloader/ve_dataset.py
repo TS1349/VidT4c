@@ -240,5 +240,5 @@ class EmognitionDataset(VERandomDataset):
                 num_out_frames = num_out_frames,
                 num_out_eeg = num_out_eeg,
                 output_shape = (9,3),
-                eeg_channel_count = 30,
+                eeg_channel_count = 4,
         )
