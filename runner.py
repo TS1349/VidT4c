@@ -34,6 +34,8 @@ def get_torch_dataset(name):
         return EmognitionDataset
     elif name == "eav":
         return EAVDataset
+    else:
+        raise Exception("Wrong dataset name")
 
 
 def run(
@@ -47,6 +49,8 @@ def run(
     experiment_name,
     checkpoint_dir,
 ):
+    print(f"dataset: {torch_dataset}")
+    print(f"model: {torch_model}")
 
     init_process_group(backend='nccl',
                        init_method='env://',
@@ -179,9 +183,6 @@ if "__main__" == __name__:
     checkpoint_dir =args.checkpoint_dir + r"/" + experiment_name
     torch_model = get_torch_model(args.model)
     torch_dataset = get_torch_dataset(args.dataset)
-    print(torch_dataset)
-    print(torch_model)
-
 
     run(epochs,
         torch_model,
@@ -191,6 +192,6 @@ if "__main__" == __name__:
         weight_decay,
         csv_file,
         experiment_name,
-        checkpoint_dir,)
+        checkpoint_dir)
 
     print("TRAINING IS DONE")
