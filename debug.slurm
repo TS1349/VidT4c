@@ -31,7 +31,7 @@ fold_csv="./datasets/fold_csv_files/MDMER_fold_csv/MDMER_dataset_updated_fold0.c
 set -x
 srun python -u ./runner.py \
         --epochs 300\
-        --batch_size 64\
+        --batch_size 8\
         --learning_rate 0.01\
         --weight_decay 0.0004\
         --csv_file "$fold_csv"\
