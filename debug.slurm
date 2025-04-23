@@ -3,12 +3,12 @@
 #SBATCH --job-name="tmMDf0"
 #SBATCH -A ntk@a100
 #SBATCH -C a100
-#SBATCH --gres=gpu:8
+#SBATCH --gres=gpu:2
 #SBATCH --nodes=1
-#SBATCH --ntasks-per-node=8
+#SBATCH --ntasks-per-node=2
 #SBATCH --cpus-per-task=8
 #SBATCH --hint=nomultithread
-#SBATCH --qos=qos_gpu_a100-t3
+#SBATCH --qos=qos_gpu-dev
 
 #SBATCH --time=20:00:00
 #SBATCH --output=mdmer_tsf_out.out
