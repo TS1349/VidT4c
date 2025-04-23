@@ -61,7 +61,7 @@ class PTrainer:
 
         self.optimizer.step()
         self.lr_scheduler.step()
-        print(f"ST, GPU ID : {self.gpu_id}, : {self.step}, lr : {self.optimizer.param_groups[0]['lr']}\
+        print(f"ST : {self.step}, GPU ID : {self.gpu_id}, lr : {self.optimizer.param_groups[0]['lr']}\
 ")
         self.step += 1
         return loss.item()
