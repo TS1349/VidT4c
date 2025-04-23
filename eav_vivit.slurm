@@ -1,18 +1,19 @@
 #!/bin/bash
 
-#SBATCH --job-name="tmEAsw0"
+#SBATCH --job-name="tmEAvi0"
+
 #SBATCH -A ntk@a100
 #SBATCH -C a100
-#SBATCH --gres=gpu:2
+#SBATCH --gres=gpu:8
 #SBATCH --nodes=1
-#SBATCH --ntasks-per-node=2
+#SBATCH --ntasks-per-node=8
 #SBATCH --cpus-per-task=8
 #SBATCH --hint=nomultithread
-#SBATCH --qos=qos_gpu_a100-dev
+#SBATCH --qos=qos_gpu_a100-t3
+#SBATCH --time=20:00:00
 
-#SBATCH --time=2:00:00
-#SBATCH --output=eav_swin_out.out
-#SBATCH --error=eav_swin_err.out
+#SBATCH --output=eav_vivit_out.out
+#SBATCH --error=eav_vivit_err.out
 
 module purge
 module load arch/a100
@@ -36,6 +37,6 @@ srun python -u ./runner.py \
         --weight_decay 0.0004\
         --csv_file "$fold_csv"\
         --checkpoint_dir "./checkpoints"\
-        --experiment_name "eav_swin_0"\
+        --experiment_name "eav_vivit_0"\
         --dataset "eav"\
-        --model "swin"
+        --model "vivit"
