@@ -57,7 +57,7 @@ class BridgedViViT4C(nn.Module):
             tubelet_size=2,
         )
         if output_dim[1] == 1:
-            self.output_dim = (output_dim[1],)
+            self.output_dim = (output_dim[0],)
 
 
         self.image_size = image_size
