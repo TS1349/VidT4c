@@ -32,7 +32,7 @@ fold_csv="./datasets/fold_csv_files/EAV_fold_csv/EAV_dataset_updated_fold0.csv"
 set -x
 srun python -u ./runner.py \
         --epochs 200\
-        --batch_size 64\
+        --batch_size 32\
         --learning_rate 0.01\
         --weight_decay 0.0004\
         --csv_file "$fold_csv"\
