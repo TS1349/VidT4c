@@ -78,14 +78,16 @@ class PTrainer:
                 sample[k] = sample[k].to(self.gpu, non_blocking=True)
             avg_loss += self._run_batch(sample)
             bn = batch_number
+
+            #DEBUG
+            #if batch_number > 2:
+            #    break
+
         avg_loss /= (bn + 1)
         print(f"TR, GPU ID : {self.gpu_id}, EP: {epoch}, \
 loss : {avg_loss}, lr : {self.optimizer.param_groups[0]['lr']}\
 ")
 
-            #DEBUG
-            #if batch_number > 2:
-            #    break
 
     def _eval(self) -> None:
         self.model.eval()
