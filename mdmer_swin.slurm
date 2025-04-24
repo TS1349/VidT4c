@@ -1,22 +1,22 @@
 #!/bin/bash
 
-#SBATCH --job-name="tmMDsw0"
+#SBATCH --job-name="tmMDsw0H"
 
-#SBATCH -A ntk@a100
-#SBATCH -C a100
-#SBATCH --gres=gpu:8
+#SBATCH -A ntk@h100
+#SBATCH -C h100
+#SBATCH --gres=gpu:4
 #SBATCH --nodes=1
-#SBATCH --ntasks-per-node=8
-#SBATCH --cpus-per-task=8
+#SBATCH --ntasks-per-node=4
+#SBATCH --cpus-per-task=24
 #SBATCH --hint=nomultithread
-#SBATCH --qos=qos_gpu_a100-t3
+#SBATCH --qos=qos_gpu_h100-t3
 #SBATCH --time=20:00:00
 
 #SBATCH --output=mdmer_swin_out.out
 #SBATCH --error=mdmer_swin_err.out
 
 module purge
-module load arch/a100
+module load arch/h100
 module load cuda/12.1.0
 module load cudnn/9.2.0.82-cuda
 module load gcc/11.3.1
