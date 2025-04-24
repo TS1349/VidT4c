@@ -187,7 +187,7 @@ if "__main__" == __name__:
     weight_decay = args.weight_decay
     csv_file = args.csv_file
     experiment_name = args.experiment_name
-    checkpoint_dir =args.checkpoint_dir + r"/" + experiment_name
+    checkpoint_dir =args.checkpoint_dir
     torch_model = get_torch_model(args.model)
     torch_dataset = get_torch_dataset(args.dataset)
 
