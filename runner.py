@@ -1,4 +1,4 @@
-import idr_torch
+# import idr_torch
 import torch
 from torch.distributed import init_process_group, destroy_process_group
 from torch.utils.data import DataLoader
@@ -9,6 +9,7 @@ import math
 import torch.nn as nn
 import torch.optim as optim
 
+from world_info import init_distributed_mode
 from trainer import PTrainer
 from models import BridgedTimeSFormer4C, BridgedViViT4C, BridgedVideoSwin4C
 from dataloader import EAVDataset, EmognitionDataset, MDMERDataset
@@ -51,6 +52,12 @@ def run(
 ):
     print(f"dataset: {torch_dataset}")
     print(f"model: {torch_model}")
+
+    idr_torch=init_distributed_mode()
+
+    print(f"size : {idr_torch.size}")
+    print(f"rank : {idr_torch.rank}")
+    print(f"local_rank : {idr_torch.local_rank}")
 
     init_process_group(backend='nccl',
                        init_method='env://',

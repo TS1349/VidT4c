@@ -1,5 +1,3 @@
-import idr_torch
-
 import math
 import time
 import torch
@@ -121,7 +119,7 @@ loss : {test_loss}, accuracy : {correct.tolist()}")
         self.time_stamp = self._time_stamp()
         for epoch in range(epochs):
             self._run_epoch(epoch)
-            if idr_torch.rank ==  0:
+            if self.gpu_id == 0:
                 self._eval()
                 if ((self.current_epoch + 1) % save_every == 0):
                     self._save_checkpoint()
