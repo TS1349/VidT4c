@@ -53,13 +53,16 @@ class PTrainer:
         output = self.model(sample)
         loss = self.loss_function(output, sample["output"])
         loss.backward()
-        nn.utils.clip_grad_norm_(parameters = self.model.parameters(),
-                                 max_norm = 1,
-                                 )
+        total_norm = nn.utils.clip_grad_norm_(
+            parameters = self.model.parameters(),
+            max_norm = 1,
+            )
 
         self.optimizer.step()
         self.lr_scheduler.step()
-        print(f"ST : {self.step}, GPU ID : {self.gpu_id}, lr : {self.optimizer.param_groups[0]['lr']}\
+        print(f"\
+ST : {self.step}, GPU ID : {self.gpu_id}, lr : {self.optimizer.param_groups[0]['lr']},\
+gn : {total_norm}\
 ")
         self.step += 1
         return loss.item()

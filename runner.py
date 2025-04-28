@@ -81,7 +81,7 @@ def run(
         time_window = 5.0, #sec
         video_transform=video_preprocessor,
         eeg_transform = AbsFFT(dim=-2),
-        split = "train"
+        split = "test"
     )
     validation_dataset = torch_dataset(
         csv_file=csv_file,
