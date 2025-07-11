@@ -20,7 +20,6 @@ class VERandomDataset(Dataset):
             num_out_frames = 32,
             num_out_eeg = 64,
             ):
-
         self.csv_file = csv_file
         self.split = split
         self.video_output_format = video_output_format
