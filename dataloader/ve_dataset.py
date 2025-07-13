@@ -20,6 +20,7 @@ class VERandomDataset(Dataset):
             num_out_frames = 32,
             num_out_eeg = 64,
             ):
+        
         self.csv_file = csv_file
         self.split = split
         self.video_output_format = video_output_format
@@ -110,13 +111,22 @@ class VERandomDataset(Dataset):
 
     def __getitem__(self, idx):
         row = self.df.iloc[idx]
+        video_path = row.facial_video
 
-        # raw data:
-        video, _ , metadata = read_video(
-            filename = row.facial_video,
-            pts_unit = "sec",
-            output_format = self.video_output_format,
+        # The 'EAV/subject20' folder dosen't exist
+        if "EAV/subject20" in video_path:
+            return self.__getitem__((idx + 1) % len(self.df))
+        
+        # Skip missing file compared with csv (after face crop)        
+        try:
+            video, _, metadata = read_video(
+                filename=video_path,
+                pts_unit="sec",
+                output_format=self.video_output_format,
             )
+        except (RuntimeError, FileNotFoundError) as e:
+            print(f"Skipping file {video_path} because: {e}")
+            return self.__getitem__((idx + 1) % len(self.df))
         
         fps = metadata["video_fps"]
 
@@ -142,7 +152,7 @@ class VERandomDataset(Dataset):
         if self.eeg_transform is not None:
             eeg = self.eeg_transform(eeg)
 
-        # final outputs:
+        # final outputs: (start with 0)
         output = self._get_label(row)
         #print(video_idxs)
         #print(eeg_idxs)
