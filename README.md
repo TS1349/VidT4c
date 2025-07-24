@@ -11,3 +11,6 @@ Using updated_csv_folders (-> mv /datasets/updated_csv_folders) with cropped vid
 
 # TODO
 - Benchmark Audio-Video model (Audio -> EEG FFT) -> I'll add this code within next week.
+
+# Pretrained
+- You can download the hicmae model's pretrained pt through here (https://drive.google.com/file/d/1mR2r-_LWmtTYl4pS_L3YlhKNCCnv_ZaE/view)
