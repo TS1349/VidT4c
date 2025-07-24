@@ -147,7 +147,8 @@ class VERandomDataset(Dataset):
         eeg_idxs = self._get_corresponding_eeg_idxs(video_idxs, fps)
         eeg = eeg[eeg_idxs,...]
 
-
+        if "Emognition" in self.csv_file: # To handle nan value of the eeg on the Emognition dataset.
+            eeg = torch.nan_to_num(eeg)
         
         if self.eeg_transform is not None:
             eeg = self.eeg_transform(eeg)
