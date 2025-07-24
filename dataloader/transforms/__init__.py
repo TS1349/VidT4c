@@ -1,6 +1,6 @@
-from .abs_fft import AbsFFT, sftf
+from .abs_fft import AbsFFT, STFT
 
 __all__ = [
     "AbsFFT",
-    "sftf",
+    "STFT",
 ]

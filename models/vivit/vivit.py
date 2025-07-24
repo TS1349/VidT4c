@@ -1,7 +1,8 @@
-from functools import partial
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from .vit import ViViT
+import os
 
 class Mlp(nn.Module):
     def __init__(self,
@@ -38,26 +39,31 @@ class BridgedViViT4C(nn.Module):
         super().__init__()
         self.args = args
 
+        self.image_size = image_size
         self.output_dim = output_dim
         if output_dim[1] == 1:
             self.output_dim = (output_dim[0],)
 
         if self.args.eeg_signal:
-            self.image_size = image_size
-            out_dim = self.image_size ** 2
-            hidden_dim = out_dim // 2
+            if self.args.fft_mode == "AbsFFT":
+                out_dim =  self.image_size ** 2
+                hidden_dim = out_dim // 2
 
-            self.bridge = Mlp(
-                in_features=eeg_channels * frequency_bins,
-                hidden_features=hidden_dim,
-                out_features=out_dim
-            )
+                self.bridge = Mlp(
+                    in_features= eeg_channels * frequency_bins,
+                    hidden_features = hidden_dim,
+                    out_features = out_dim
+                )
+
+            elif self.args.fft_mode == "Spectrogram": 
+                self.eeg2fps = nn.Conv2d(eeg_channels * 2, 32, kernel_size=3, stride=1, padding=1, bias=True)
 
             self.input_ch = 4
         else:
             self.input_ch = 3
 
-        self.video_model = ViViT(
+        # ViViT (https://github.com/rishikksh20/ViViT-pytorch)
+        self.model = ViViT(
             image_size=image_size,
             patch_size=16,
             num_classes=output_dim[0] * output_dim[1],
@@ -78,15 +84,21 @@ class BridgedViViT4C(nn.Module):
     def forward(self, x):
         # Choose video vs video+EEG by arg option
         if self.args.eeg_signal:
-            eeg = x["eeg"].flatten(start_dim=-2)
-            eeg = self.bridge(eeg)
-            new_shape = eeg.shape[:2] + (1, self.image_size, self.image_size)
-            eeg = eeg.view(new_shape)
+            if self.args.fft_mode == "AbsFFT":
+                eeg = x["eeg"].flatten(start_dim=-2)
+                eeg = self.bridge(eeg)
+                new_shape = eeg.shape[:2] + (1, self.image_size, self.image_size)
+                eeg = eeg.view(new_shape)
+            elif self.args.fft_mode == "Spectrogram": 
+                eeg = x["eeg"]
+                eeg = F.interpolate(eeg, size=(self.image_size, self.image_size), mode='bilinear', align_corners=False)
+                eeg = self.eeg2fps(eeg).unsqueeze(2)
+            
             four_channel_video = torch.cat([x["video"], eeg], dim = -3)
             four_channel_video.transpose_(-3, -4)
-            output = self.video_model(four_channel_video)
+            output = self.model(four_channel_video)
         else:
-            output = self.video_model(x["video"].transpose_(-3, -4))
+            output = self.model(x["video"].transpose_(-3, -4))
 
         new_out_shape = output.shape[:-1] + self.output_dim
         output = output.view(new_out_shape)

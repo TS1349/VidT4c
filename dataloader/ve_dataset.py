@@ -21,7 +21,7 @@ class VERandomDataset(Dataset):
             num_out_eeg = 64,
             ):
         
-        self.csv_file = csv_file
+        self.csv_file = str(csv_file)
         self.split = split
         self.video_output_format = video_output_format
 
@@ -67,7 +67,7 @@ class VERandomDataset(Dataset):
         return torch.tensor(row.label_id, dtype = torch.int64)
     
     def _get_full_eeg(self, row):
-        eeg = pd.read_csv(row.EEG)
+        eeg = pd.read_csv(row.EEG) # Sample x channel
         eeg = torch.tensor(eeg.to_numpy(), dtype = torch.float32)
         return eeg
     
@@ -84,7 +84,7 @@ class VERandomDataset(Dataset):
 
         random_start_idx = torch_random_int(
             low = lower_bound,
-            high = upper_bound,
+            high = upper_bound, # ! low + 32 x 6.4
             )
         
         idxs = VERandomDataset._decimate_idxs(
@@ -113,11 +113,11 @@ class VERandomDataset(Dataset):
         row = self.df.iloc[idx]
         video_path = row.facial_video
 
-        # The 'EAV/subject20' folder dosen't exist
+        # Skip missing file compared with csv (after face crop)
+        # The 'EAV/subject20' folder dosen't exist now
         if "EAV/subject20" in video_path:
             return self.__getitem__((idx + 1) % len(self.df))
         
-        # Skip missing file compared with csv (after face crop)        
         try:
             video, _, metadata = read_video(
                 filename=video_path,
@@ -131,9 +131,9 @@ class VERandomDataset(Dataset):
         fps = metadata["video_fps"]
 
         eeg = self._get_full_eeg(row)
-        eeg_time_to_frames = math.floor(math.floor((eeg.shape[0] / self.eeg_sampling_rate)) * fps)
+        eeg_time_to_frames = math.floor(math.floor((eeg.shape[0] / self.eeg_sampling_rate)) * fps) # Seconds x fps for EEG frame
 
-        total_frames = min(video.shape[0], eeg_time_to_frames)
+        total_frames = min(video.shape[0], eeg_time_to_frames) # Based on frame
 
         video_idxs = self._get_random_frame_idxs(total_frames, fps)
         video = video[video_idxs, ...]
@@ -175,7 +175,7 @@ class EAVDataset(VERandomDataset):
     def __init__(
             self,
             csv_file,
-            time_window = 5.0,
+            time_window = 8.0,
             split="train",
             video_output_format = "TCHW",
             video_transform = None,
@@ -202,7 +202,7 @@ class MDMERDataset(VERandomDataset):
     def __init__(
             self,
             csv_file,
-            time_window = 5.0,
+            time_window = 8.0,
             split="train",
             video_output_format = "TCHW",
             video_transform = None,
@@ -229,7 +229,7 @@ class EmognitionDataset(VERandomDataset):
     def __init__(
             self,
             csv_file,
-            time_window = 5.0,
+            time_window = 8.0,
             split="train",
             video_output_format = "TCHW",
             video_transform = None,
