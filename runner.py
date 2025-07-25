@@ -15,7 +15,7 @@ import numpy as np
 
 from world_info import init_distributed_mode
 from trainer import PTrainer
-from models import BridgedTimeSFormer4C, BridgedViViT4C, BridgedVideoSwin4C, AudioVisionTransformer
+from models import BridgedTimeSFormer4C, BridgedViViT4C, BridgedVideoSwin4C, AudioVisionTransformer, TVLTTransformer
 from dataloader import EAVDataset, EmognitionDataset, MDMERDataset
 from dataloader.transforms import AbsFFT, STFT
 from scheduler import CosineScheduler
@@ -31,6 +31,8 @@ def get_torch_model(name):
         return BridgedVideoSwin4C
     elif name == "hicmae":
         return AudioVisionTransformer
+    elif name == "tvlt":
+        return TVLTTransformer
     else:
         raise Exception("Wrong model name")
 
@@ -130,7 +132,7 @@ def run(
         time_window = 8.0, #sec -> change to avoid duplication of eeg sampling
         video_transform=video_preprocessor,
         eeg_transform = fft,
-        split = "test"
+        split = "train"
     )
     validation_dataset = torch_dataset(
         csv_file=csv_file,
@@ -247,7 +249,14 @@ def run(
 
         hicmae_load_state_dict(model, checkpoint_model)
 
-    
+    elif args.model == 'tvlt':
+        model = torch_model(args, output_dim = training_dataset.output_shape, eeg_channels = training_dataset.eeg_channel_count, img_size=img_size, frames = 32)
+        pretrained_path = os.path.join(os.getcwd(), 'pretrained', args.model + '.ckpt')
+        print(f'Loading pretrained weights from {pretrained_path}')
+
+        checkpoint = torch.load(pretrained_path)
+        model.load_state_dict(checkpoint, strict=False)
+
     else:
         model = torch_model(args,
                     output_dim = training_dataset.output_shape,
@@ -305,17 +314,17 @@ if "__main__" == __name__:
 
     parser.add_argument("--epochs", type=int, default=20) # Check the code's feasibility
     parser.add_argument("--num_gpus", type=int, default=1) # Check multi-gpu
-    parser.add_argument("--batch_size", type=int, default=4)
+    parser.add_argument("--batch_size", type=int, default=1)
     parser.add_argument("--learning_rate", type=float, default=0.01)
     parser.add_argument("--weight_decay", type=float, default=0.0004)
-    parser.add_argument("--csv_file", type=str, default= "./datasets/updated_fold_csv_files/MDMER_fold_csv/MDMER_dataset_updated_fold0.csv")
+    parser.add_argument("--csv_file", type=str, default= "./datasets/updated_fold_csv_files/Emognition_fold_csv/Emognition_dataset_updated_fold0.csv")
     parser.add_argument("--checkpoint_dir", type=str, default="./checkpoints")
     parser.add_argument("--pretrained_dir", type=str, default="./pretrained")
-    parser.add_argument('--pretrained', action='store_true', default=False,
+    parser.add_argument('--pretrained', action='store_true', default=True,
                         help='Choose pretrained backbone or scratch for swin and hicmae')
-    parser.add_argument("--experiment_name", type=str, default="debug-test")
-    parser.add_argument("--dataset", type=str, default="mdmer")
-    parser.add_argument("--model", type=str, default="vivit")
+    parser.add_argument("--experiment_name", type=str, default="emognition_tvlt-stft_b4_e20_res224")
+    parser.add_argument("--dataset", type=str, default="emognition", choices=('eav', 'mdmer', 'emognition'))
+    parser.add_argument("--model", type=str, default="tvlt", choices=('vivit', 'swin', 'tsf', 'hicmae', 'tvlt'))
     parser.add_argument("--port", type=str, default="8008")
     parser.add_argument("--seed", type=int, default="7254")
     parser.add_argument("--img_size", type=int, default="224") # In the Nef resource
