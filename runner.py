@@ -130,7 +130,7 @@ def run(
         time_window = 8.0, #sec -> change to avoid duplication of eeg sampling
         video_transform=video_preprocessor,
         eeg_transform = fft,
-        split = "test"
+        split = "train"
     )
     validation_dataset = torch_dataset(
         csv_file=csv_file,
