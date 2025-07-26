@@ -1,10 +1,13 @@
 import math
 import time
-from tqdm import tqdm
 import torch
 from torch.nn.parallel import DistributedDataParallel as DDP
-import torch.distributed as dist
 import os
+
+try:
+    import tqdm
+except ImportError:
+    tqdm = None
 
 class PTrainer:
     def __init__(self,
@@ -18,6 +21,7 @@ class PTrainer:
                  gpu,
                  checkpoint_dir,
                  experiment_name="",
+                 use_tqdm = True,
                  ):
 
         self.time_stamp = "00000000"
@@ -26,8 +30,10 @@ class PTrainer:
 
         # For saving the validation loss and accuracy
         self.log_dir = os.path.join(self.checkpoint_dir, self.experiment_name)
-        os.makedirs(self.log_dir, exist_ok=True)
-        self.val_log_path = os.path.join(self.log_dir, "val_loss.txt")
+        self.checkpoint_subdir = os.path.join(self.log_dir, "checkpoints")
+        os.makedirs(self.checkpoint_subdir, exist_ok=True)
+
+        self.val_log_path = os.path.join(self.log_dir, "val_loss.log")
 
         self.training_dataloader = training_dataloader
         self.validation_dataloader = validation_dataloader
@@ -42,12 +48,11 @@ class PTrainer:
         self.model = DDP(model, device_ids=[self.gpu_id])
         self.step = 0
         self.current_epoch = 0
+        self.use_tqdm = use_tqdm
 
     def _save_checkpoint(self):
         checkpoint = self.model.module.state_dict()
 
-        self.checkpoint_subdir = os.path.join(self.log_dir, "checkpoints")
-        os.makedirs(self.checkpoint_subdir, exist_ok=True)
         checkpoint_path =\
             f"{self.checkpoint_subdir}/{self.time_stamp}_{self.experiment_name}_{self.current_epoch}.pt"
 
@@ -72,46 +77,64 @@ class PTrainer:
     def _time_stamp(self):
         return str(math.floor(time.time()))
 
-    def _run_epoch(self, epoch) -> None:
+    def _run_epoch(self, epoch):
         self.model.train()
         self.training_dataloader.sampler.set_epoch(epoch)  # multi-gpu
 
         avg_loss = 0
-        bn = 0
 
         # Replace printing accuracy at each step to pbar based on epochs
-        pbar = tqdm(total=len(self.training_dataloader), desc=f"Train Epoch {epoch}")
+        if (tqdm is not None) and self.use_tqdm:
+            pbar = tqdm.tqdm(total=len(self.training_dataloader), desc=f"Train Epoch {epoch}")
+        else:
+            pbar = None
 
         for batch_number, sample in enumerate(self.training_dataloader):
             for k in sample:
                 sample[k] = sample[k].to(self.gpu, non_blocking=True)
             batch_loss = self._run_batch(sample)
             avg_loss += batch_loss
-            bn = batch_number
 
-            running_avg_loss = avg_loss / (bn + 1)
+            running_avg_loss = avg_loss / (batch_number + 1)
 
-            pbar.set_postfix({
-                # 'batch_loss': f'{batch_loss:.4f}',
-                'avg_loss': f'{running_avg_loss:.4f}',
-                'lr': f'{self.optimizer.param_groups[0]["lr"]:.6f}'
-            })
-            pbar.update(1)
+            if (pbar is not None):
+                pbar.set_postfix({
+                    # 'batch_loss': f'{batch_loss:.4f}',
+                    'avg_loss': f'{running_avg_loss:.4f}',
+                    'lr': f'{self.optimizer.param_groups[0]["lr"]:.6f}'
+                })
+                pbar.update(1)
+            else:
+                print(f"T/G[{self.gpu_id}]/E[{epoch}]/B[{batch_number}] : L={running_avg_loss:.4f}; lr={self.optimizer.param_group[0]["lr"]:.6f}")
 
-        pbar.close()
+        if (pbar is not None):
+            pbar.close()
+
 
     def _eval(self) -> None:
         self.model.eval()
-        size = len(self.validation_dataloader.dataset)
         num_batches = len(self.validation_dataloader)
         total_loss = 0.0
         total_samples = 0
 
         total_correct = None
-        pbar = tqdm(total=num_batches, desc=f"Validate Epoch {self.current_epoch}")
+        if (tqdm is not None) and self.use_tqdm:
+            pbar = tqdm.tqdm(total=num_batches, desc=f"Validate Epoch {self.current_epoch}")
+        else:
+            pbar = None
+
+        # Temo : had to add these so that pyright would shut up
+        # <error_sentinels>
+        pred = None
+        global_loss = -1.0
+        val_acc = -1.0
+        aro_acc = -1.0
+        dom_acc = -1.0
+        avg_acc = -1.0
+        # </error_sentinels>
 
         with torch.inference_mode():
-            for batch_number, sample in enumerate(self.validation_dataloader):
+            for _, sample in enumerate(self.validation_dataloader):
                 batch_size_now = sample["output"].size(0)
                 total_samples += batch_size_now
 
@@ -157,17 +180,24 @@ class PTrainer:
                 else:
                     raise ValueError(f"Unexpected prediction shape: {pred.shape}")
 
-                pbar.set_postfix_str(f"val_loss={global_loss:.4f}, {acc_str}")
-                pbar.update(1)
+                if (pbar is not None):
+                    pbar.set_postfix_str(f"val_loss={global_loss:.4f}, {acc_str}")
+                    pbar.update(1)
+                else:
+                    print(f"V/G[{self.gpu_id}]/val_loss={global_loss:.4f}, {acc_str}")
 
-        pbar.close()
+        if (pbar is not None):
+            pbar.close()
 
         # Save the validation logger in the checkpoints dir
         with open(self.val_log_path, "a") as f:
-            if pred.dim() == 2 and pred.size(1) == 3:
-                f.write(f"{self.current_epoch},{global_loss:.6f},{val_acc:.6f},{aro_acc:.6f},{dom_acc:.6f}\n")
+            if (pred is not None):
+                if pred.dim() == 2 and pred.size(1) == 3:
+                    f.write(f"{self.current_epoch},{global_loss:.6f},{val_acc:.6f},{aro_acc:.6f},{dom_acc:.6f}\n")
+                else:
+                    f.write(f"{self.current_epoch},{global_loss:.6f},{avg_acc:.6f}\n")
             else:
-                f.write(f"{self.current_epoch},{global_loss:.6f},{avg_acc:.6f}\n")
+                f.write(f"Error: pred is None")
 
 
     def train(self, epochs, save_every):

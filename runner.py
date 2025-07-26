@@ -68,9 +68,7 @@ def hicmae_load_state_dict(model, state_dict, prefix='', ignore_missing="relativ
     load(model, prefix=prefix)
 
 
-def run(
-    rank, args
-):
+def run(rank, args):
     print(f"[RANK {rank}] Starting process...")
 
     # Minimize randomness
@@ -120,6 +118,7 @@ def run(
     )
 
     # Check the right fourier transformation
+    fft = None
     if fft_mode == "AbsFFT":
         fft = AbsFFT(dim=-2)
         freq_bin = 64
@@ -333,14 +332,17 @@ if "__main__" == __name__:
                         help='Choose video or video+EEG by arg option')
     parser.add_argument('--fft_mode', type=str, default='Spectrogram', # Consider this on next step
                         choices=('AbsFFT', 'Spectrogram'), help='Choose FFT transformation method')
+    parser.add_argument('--server', type=str, default='g_zey', choices=('g_zey', 'nef'), help='Choose which server for appropriate settings')
 
     args = parser.parse_args()
 
     # Add master information
-    os.environ["MASTER_ADDR"] = "localhost"
-    os.environ["MASTER_PORT"] = args.port
+    if(args.server == 'nef'):
+        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_PORT"] = args.port
 
     # Spawning (<- run function) with each rank of gpu
+
     if args.num_gpus > 1:
         spawn_context = mp.spawn(
             run,
