@@ -137,6 +137,6 @@ if "__main__" == __name__:
 
     slurm_script = fill_in(args)
 
-    file_name = f"./{"debug_" if args.debug else ""}{args.model}_{args.dataset}.slurm"
+    file_name = f"./{'debug_' if args.debug else ''}{args.model}_{args.dataset}.slurm"
     with open(file_name, "w") as file:
         file.write(slurm_script)
