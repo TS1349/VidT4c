@@ -96,12 +96,37 @@ def run(rank, args):
     print(f"dataset: {torch_dataset}")
     print(f"model: {torch_model}")
 
-    # Distribute each GPUS by rank
-    dist.init_process_group(backend='nccl', init_method='env://',
-                            world_size=args.num_gpus, rank=rank)
+    # split process group_intialization
+    idr_torch = None
+    if ("g_zey" == args.server):
+
+        idr_torch=init_distributed_mode()
+
+        if(idr_torch is not None):
+            world_size = idr_torch.size
+            rank = idr_torch.rank
+            local_rank = idr_torch.local_rank
+            num_replicas = idr_torch.size
+        else:
+            print("couldn't initialize idr_torch")
+            return -1
+
+    elif ("nef" == args.server):
+        world_size = args.num_gpus
+        rank = rank
+        local_rank = rank
+        num_replicas = args.num_gpus
+    else:
+        print("This point should be unreachable")
+        return -2
+
+    dist.init_process_group(backend='nccl',
+                            init_method='env://',
+                            world_size=world_size,
+                            rank=rank)
 
     if torch.cuda.is_available():
-        torch.cuda.set_device(rank)
+        torch.cuda.set_device(local_rank)
     else:
         print("No GPU available")
  
@@ -143,14 +168,14 @@ def run(rank, args):
 
     training_sampler = DistributedSampler(
         dataset=training_dataset,
-        num_replicas=args.num_gpus,
+        num_replicas=num_replicas,
         rank=rank,
     )
 
     # Add validation sampler
     validation_sampler = DistributedSampler(
         dataset=validation_dataset,
-        num_replicas=args.num_gpus,
+        num_replicas=num_replicas,
         rank=rank,
     )
 
@@ -159,7 +184,8 @@ def run(rank, args):
         batch_size=batch_size,
         shuffle=False,
         pin_memory=True,
-        sampler=training_sampler, drop_last=True, # Add drop_last
+        sampler=training_sampler,
+        drop_last=True, # Add drop_last
     )
 
     # Val-dataloader shouldn't be sampled by training_sampler
@@ -168,7 +194,8 @@ def run(rank, args):
         batch_size=batch_size,
         shuffle=False,
         pin_memory=True,
-        sampler=validation_sampler, drop_last=False,
+        sampler=validation_sampler,
+        drop_last=False,
     )
 
 
@@ -286,7 +313,7 @@ def run(rank, args):
 
     p_trainer = PTrainer(
         model=model,
-        lr_scheduler = lr_scheduler,
+        lr_scheduler=lr_scheduler,
         training_dataloader=training_dataloader,
         validation_dataloader=validation_dataloader,
         optimizer=optimizer,
@@ -300,7 +327,7 @@ def run(rank, args):
     p_trainer.train(epochs, save_every = 10)
 
     dist.destroy_process_group()
-    print("Process group destroyed; Training finished")
+    print(f"Process group {rank} destroyed; Training finished")
 
 
 if "__main__" == __name__:
@@ -337,27 +364,30 @@ if "__main__" == __name__:
     args = parser.parse_args()
 
     # Add master information
-    if(args.server == 'nef'):
+    if('nef' == args.server):
         os.environ["MASTER_ADDR"] = "localhost"
         os.environ["MASTER_PORT"] = args.port
 
     # Spawning (<- run function) with each rank of gpu
 
-    if args.num_gpus > 1:
-        spawn_context = mp.spawn(
-            run,
-            nprocs=args.num_gpus,
-            args=(args,), join=False
-        )
+        if args.num_gpus > 1:
+            spawn_context = mp.spawn(
+                run,
+                nprocs=args.num_gpus,
+                args=(args,), join=False
+            )
 
-        while not spawn_context.join():
-            pass
+            while not spawn_context.join():
+                pass
 
-        for process in spawn_context.processes:
-            if process.is_alive():
-                process.terminate()
-            process.join()
+            for process in spawn_context.processes:
+                if process.is_alive():
+                    process.terminate()
+                process.join()
+        else:
+            run(0, args)
     else:
-        run(0, args)
+        run(-1, args)
+
 
     print("TRAINING IS DONE")
