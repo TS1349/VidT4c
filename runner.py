@@ -98,7 +98,7 @@ def run(rank, args):
 
     # split process group_intialization
     idr_torch = None
-    if ("g_zey" == args.server):
+    if ("j_zay" == args.server):
 
         idr_torch=init_distributed_mode()
 
@@ -359,7 +359,7 @@ if "__main__" == __name__:
                         help='Choose video or video+EEG by arg option')
     parser.add_argument('--fft_mode', type=str, default='Spectrogram', # Consider this on next step
                         choices=('AbsFFT', 'Spectrogram'), help='Choose FFT transformation method')
-    parser.add_argument('--server', type=str, default='g_zey', choices=('g_zey', 'nef'), help='Choose which server for appropriate settings')
+    parser.add_argument('--server', type=str, default='j_zay', choices=('j_zay', 'nef'), help='Choose which server for appropriate settings')
 
     args = parser.parse_args()
 

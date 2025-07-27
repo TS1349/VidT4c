@@ -1,0 +1,48 @@
+def fill_in(args):
+    dataset = args.dataset
+    fold = args.fold
+    model = args.model
+    gpu = args.gpu
+    return f'\
+#!/bin/bash\n\n\
+#SBATCH --job-name=\
+"tm{(model[:2]).lower()}{(dataset[:2]).upper()}{fold}{gpu[0].upper()}"\n\
+#SBATCH -A ntk@h100\n\
+#SBATCH -C h100\n\
+#SBATCH --gres=gpu:4\n\
+#SBATCH --nodes=1\n\
+#SBATCH --ntasks-per-node=4\n\
+#SBATCH --cpus-per-task=24\n\
+#SBATCH --hint=nomultithread\n\
+#SBATCH --qos=qos_gpu_h100-t3\n\
+#SBATCH --time=20:00:00\n\
+#SBATCH --output={model}_{dataset}.out\n\
+#SBATCH --error={model}_{dataset}.err\n\n\n\n\
+module purge\n\
+module load arch/h100\n\
+module load cuda/12.1.0\n\
+module load cudnn/9.2.0.82-cuda\n\
+module load gcc/11.3.1\n\
+module load anaconda-py3/2024.06\n\n\n\n\
+conda activate tsf4\n\n\
+export MASTER_PORT=$((12000 + $RANDOM % 20000))\n\
+export OMP_NUM_THREADS=1\n\n\
+fold_csv="./datasets/fold_csv_files/EAV_fold_csv/EAV_dataset_updated_fold0.csv"\n\n\n\n\
+set -x\n\
+srun python -u ./runner.py \\\n\
+        --epochs 200\\\n\
+        --batch_size 32\\\n\
+        --learning_rate 0.01\\\n\
+        --weight_decay 0.0004\\\n\
+        --csv_file "$fold_csv"\\\n\
+        --checkpoint_dir "./checkpoints"\\\n\
+        --experiment_name "eav_swin_0"\\\n\
+        --dataset "eav"\\\n\
+        --model "swin"\n\
+'
+
+
+
+
+
+
