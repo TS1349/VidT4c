@@ -13,7 +13,7 @@ def qos(gpu, debug):
         else:
             return "qos_gpu_h100-t3"
     else:
-        raise ValueError(f"{gpu} isn't an appropriate gpu typ")
+        raise ValueError(f"{gpu} isn't an appropriate gpu type")
 
 def max_hour(gpu, debug):
     #returns maximal HH:MM:SS
@@ -30,7 +30,7 @@ def max_hour(gpu, debug):
         else:
             return "20:00:00"
     else:
-        raise ValueError(f"{gpu} isn't an appropriate gpu typ")
+        raise ValueError(f"{gpu} isn't an appropriate gpu type")
 
 def cpu_per_task(gpu):
     #returns maximal HH:MM:SS
@@ -41,7 +41,20 @@ def cpu_per_task(gpu):
     if "h100" == gpu:
         return 24
     else:
-        raise ValueError(f"{gpu} isn't an appropriate gpu typ")
+        raise ValueError(f"{gpu} isn't an appropriate gpu type")
+
+def fold_name(dataset):
+    if ("emognition" == dataset):
+        return "Emognition"
+    elif ("eav" == dataset):
+        return "EAV"
+    elif ("mdmer" == dataset):
+        return "MDMER"
+    else:
+        raise ValueError(f"{dataset} isn't an appropriate dataset name")
+def csv_location(dataset, fold):
+    dataset = fold_name(dataset)
+    return f"./datasets/updated_fold_csv_files/{dataset}_fold_csv/{dataset}_dataset_updated_fold{fold}.csv"
 
 def fill_in(args):
     dataset = args.dataset
@@ -74,7 +87,7 @@ module load anaconda-py3/2024.06\n\n\n\n\
 conda activate tsf4\n\n\
 export MASTER_PORT=$((12000 + $RANDOM % 20000))\n\
 export OMP_NUM_THREADS=1\n\n\
-fold_csv="./datasets/fold_csv_files/EAV_fold_csv/EAV_dataset_updated_fold{fold}.csv"\n\n\n\n\
+fold_csv="{csv_location(dataset, fold)}"\n\n\n\n\
 set -x\n\
 srun python -u ./runner.py \\\n\
         --epochs 200\\\n\
@@ -124,6 +137,6 @@ if "__main__" == __name__:
 
     slurm_script = fill_in(args)
 
-    file_name = f"./{"debug" if args.debug else ""}{args.model}_{args.dataset}.slurm"
+    file_name = f"./{"debug_" if args.debug else ""}{args.model}_{args.dataset}.slurm"
     with open(file_name, "w") as file:
         file.write(slurm_script)
