@@ -53,8 +53,8 @@ def fill_in(args):
     return f'\
 #!/bin/bash\n\n\
 #SBATCH --job-name=\
-"tm{(model[:2]).lower()}{(dataset[:2]).upper()}{fold}{gpu[0].upper()}"\n\
-#SBATCH -A ntk@h100\n\
+"TM{(model[:2]).lower()}{(dataset[:2]).upper()}{fold}{gpu[0].upper()}"\n\
+#SBATCH -A ntk@{gpu}\n\
 #SBATCH -C {gpu}\n\
 #SBATCH --gres=gpu:{num_gpus}\n\
 #SBATCH --nodes=1\n\
@@ -91,6 +91,12 @@ srun python -u ./runner.py \\\n\
 if "__main__" == __name__:
     parser = argparse.ArgumentParser(description="SlurmFileGenerator")
 
+
+    parser.add_argument("--model",
+                        type=str,
+                        default="tvlt",
+                        choices=("vivit", "swin", "tsf", "hicmae", "tvlt"))
+
     parser.add_argument("--dataset",
                         type=str,
                         default="emognition",
@@ -100,11 +106,6 @@ if "__main__" == __name__:
                         type=int,
                         default=0,
                         choices=(0,1,2,3,4))
-
-    parser.add_argument("--model",
-                        type=str,
-                        default="tvlt",
-                        choices=("vivit", "swin", "tsf", "hicmae", "tvlt"))
 
     parser.add_argument("--gpu",
                         type=str,
@@ -120,3 +121,9 @@ if "__main__" == __name__:
                         default=1)
 
     args = parser.parse_args()
+
+    slurm_script = fill_in(args)
+
+    file_name = f"./{"debug" if args.debug else ""}{args.model}_{args.dataset}.slurm"
+    with open(file_name, "w") as file:
+        file.write(slurm_script)
