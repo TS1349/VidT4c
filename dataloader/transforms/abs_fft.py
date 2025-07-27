@@ -1,7 +1,6 @@
 from torch.fft import fft
 import torch
 import torch.nn.functional as F
-import matplotlib.pyplot as plt
 
 
 class AbsFFT(object):
