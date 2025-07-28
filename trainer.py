@@ -105,7 +105,7 @@ class PTrainer:
                 })
                 pbar.update(1)
             else:
-                print(f"T/G[{self.gpu_id}]/E[{epoch}]/B[{batch_number}] : L={running_avg_loss:.4f}; lr={self.optimizer.param_group[0]["lr"]:.6f}")
+                print(f"T/G[{self.gpu_id}]/E[{epoch}]/B[{batch_number}] : L={running_avg_loss:.4f}; lr={self.optimizer.param_groups[0]["lr"]:.6f}")
 
         if (pbar is not None):
             pbar.close()
