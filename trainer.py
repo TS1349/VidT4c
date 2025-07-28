@@ -21,7 +21,7 @@ class PTrainer:
                  gpu,
                  checkpoint_dir,
                  experiment_name="",
-                 use_tqdm = True,
+                 use_tqdm = False,
                  ):
 
         self.time_stamp = "00000000"
