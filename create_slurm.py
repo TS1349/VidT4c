@@ -63,6 +63,7 @@ def fill_in(args):
     gpu = args.gpu
     debug = args.debug
     num_gpus = args.num_gpus
+    batch_size = args.batch_size
     return f'\
 #!/bin/bash\n\n\
 #SBATCH --job-name=\
@@ -91,7 +92,7 @@ fold_csv="{csv_location(dataset, fold)}"\n\n\n\n\
 set -x\n\
 srun python -u ./runner.py \\\n\
         --epochs 200\\\n\
-        --batch_size 32\\\n\
+        --batch_size {batch_size}\\\n\
         --learning_rate 0.01\\\n\
         --weight_decay 0.0004\\\n\
         --csv_file "$fold_csv"\\\n\
@@ -132,6 +133,10 @@ if "__main__" == __name__:
     parser.add_argument("--num_gpus",
                         type=int,
                         default=1)
+
+    parser.add_argument("--batch_size",
+                        type=int,
+                        default=64)
 
     args = parser.parse_args()
 

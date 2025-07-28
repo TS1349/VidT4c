@@ -1,6 +1,7 @@
 datasets
 checkpoints/
 *.out
+*.err
 old_slurm/
 *.slurm
 
