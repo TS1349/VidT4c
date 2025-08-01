@@ -75,31 +75,31 @@ class BridgedViViT4C(nn.Module):
             in_channels=self.input_ch,
             dim_head=64,
             dropout=0.,
-            emb_dropout=0.,
+            emb_dropout=0.1,
             scale_dim=4,
             tubelet_size=2,
         )
+            
 
-    
-    def forward(self, x):
+    def forward(self, sample):
         # Choose video vs video+EEG by arg option
         if self.args.eeg_signal:
             if self.args.fft_mode == "AbsFFT":
-                eeg = x["eeg"].flatten(start_dim=-2)
+                eeg = sample["eeg"].flatten(start_dim=-2)
                 eeg = self.bridge(eeg)
                 new_shape = eeg.shape[:2] + (1, self.image_size, self.image_size)
                 eeg = eeg.view(new_shape)
             elif self.args.fft_mode == "Spectrogram": 
-                eeg = x["eeg"]
-                eeg = F.interpolate(eeg, size=(self.image_size, self.image_size), mode='bilinear', align_corners=False)
+                eeg = F.interpolate(sample["eeg"], size=(self.image_size, self.image_size), mode='bilinear', align_corners=False)
                 eeg = self.eeg2fps(eeg).unsqueeze(2)
             
-            four_channel_video = torch.cat([x["video"], eeg], dim = -3)
+            four_channel_video = torch.cat([sample["video"], eeg], dim = -3)
             four_channel_video.transpose_(-3, -4)
             output = self.model(four_channel_video)
         else:
-            output = self.model(x["video"].transpose_(-3, -4))
+            output = self.model(sample["video"].transpose_(-3, -4))
 
         new_out_shape = output.shape[:-1] + self.output_dim
         output = output.view(new_out_shape)
+        
         return output

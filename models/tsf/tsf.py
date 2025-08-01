@@ -4,7 +4,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 from .vit import VisionTransformer
 from .layers import Mlp
-import os
 
 
 class BridgedTimeSFormer4C(nn.Module):
@@ -43,7 +42,7 @@ class BridgedTimeSFormer4C(nn.Module):
             self.input_ch = 3
 
         # TimeSformer (https://github.com/facebookresearch/TimeSformer/blob/a5ef29a7b7264baff199a30b3306ac27de901133/timesformer/models/vit.py)
-        self.video_model = VisionTransformer(
+        self.model = VisionTransformer(
             img_size=image_size,
             output_dim= output_dim[0]*output_dim[1],
             patch_size=16,
@@ -77,9 +76,9 @@ class BridgedTimeSFormer4C(nn.Module):
             
             four_channel_video = torch.cat([x["video"], eeg], dim = -3)
             four_channel_video.transpose_(-3, -4)
-            output = self.video_model(four_channel_video)
+            output = self.model(four_channel_video)
         else:
-            output = self.video_model(x["video"].transpose_(-3, -4))
+            output = self.model(x["video"].transpose_(-3, -4))
 
         new_out_shape = output.shape[:-1] + self.output_dim
         output = output.view(new_out_shape)

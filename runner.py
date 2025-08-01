@@ -7,9 +7,10 @@ from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 # from torchaudio.transforms import Spectrogram
 
-from torchvision.transforms.v2 import Compose, Normalize, Resize, ToDtype
+from torchvision.transforms.v2 import Compose, Normalize, Resize, ToDtype, RandomHorizontalFlip, ColorJitter
 import math
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 import numpy as np
 
@@ -19,6 +20,8 @@ from models import BridgedTimeSFormer4C, BridgedViViT4C, BridgedVideoSwin4C, Aud
 from dataloader import EAVDataset, EmognitionDataset, MDMERDataset
 from dataloader.transforms import AbsFFT, STFT
 from scheduler import CosineScheduler
+
+from torch.nn.parallel import DistributedDataParallel as DDP
 
 import argparse
 
@@ -47,7 +50,7 @@ def get_torch_dataset(name):
         raise Exception("Wrong dataset name")
 
 
-def hicmae_load_state_dict(model, state_dict, prefix='', ignore_missing="relative_position_index"):
+def _load_state_dict(model, state_dict, prefix='', ignore_missing="relative_position_index"):
     missing_keys = []
     unexpected_keys = []
     error_msgs = []
@@ -67,6 +70,24 @@ def hicmae_load_state_dict(model, state_dict, prefix='', ignore_missing="relativ
 
     load(model, prefix=prefix)
 
+class WarmupCosineScheduler:
+    def __init__(self, optimizer, warmup_steps, total_steps, min_lr=0.0):
+        self.optimizer = optimizer
+        self.warmup_steps = warmup_steps
+        self.total_steps = total_steps
+        self.min_lr = min_lr
+        self.current_step = 0
+
+    def step(self):
+        self.current_step += 1
+        if self.current_step < self.warmup_steps:
+            lr_scale = self.current_step / self.warmup_steps
+        else:
+            progress = (self.current_step - self.warmup_steps) / max(1, self.total_steps - self.warmup_steps)
+            lr_scale = 0.5 * (1 + math.cos(math.pi * progress))
+        for param_group in self.optimizer.param_groups:
+            base_lr = param_group.get("initial_lr", param_group["lr"])
+            param_group["lr"] = self.min_lr + (base_lr - self.min_lr) * lr_scale
 
 def run(
     rank, args
@@ -108,16 +129,20 @@ def run(
         print("No GPU available")
  
     # Data processing
-    video_preprocessor = Compose(
-        [
-         Resize(size=(img_size,img_size), antialias=True),
-         ToDtype(torch.float32),
-        #  ToDtype(torch.float32, scale=True),
-         Normalize(
-             mean=(0.45, 0.45, 0.45),
-             std=(0.225, 0.225, 0.225),
-         )]
-    )
+    video_preprocessor_train = Compose([
+        Resize(size=(img_size, img_size), antialias=True),
+        RandomHorizontalFlip(p=0.5),
+        ColorJitter(brightness=0.2, contrast=0.2),
+        lambda x: x.float().div(255.0),
+        Normalize(mean=(0.45, 0.45, 0.45), std=(0.225, 0.225, 0.225)),
+    ])
+
+    # During infernece, we don't need other transformations.
+    video_preprocessor_val = Compose([
+        Resize(size=(img_size, img_size), antialias=True),
+        lambda x: x.float().div(255.0),
+        Normalize(mean=(0.45, 0.45, 0.45), std=(0.225, 0.225, 0.225)),
+    ])
 
     # Check the right fourier transformation
     if fft_mode == "AbsFFT":
@@ -129,15 +154,15 @@ def run(
 
     training_dataset = torch_dataset(
         csv_file=csv_file,
-        time_window = 8.0, #sec -> change to avoid duplication of eeg sampling
-        video_transform=video_preprocessor,
+        time_window = 15.0, #sec -> change to avoid duplication of eeg sampling
+        video_transform=video_preprocessor_train,
         eeg_transform = fft,
         split = "train"
     )
     validation_dataset = torch_dataset(
         csv_file=csv_file,
-        time_window = 8.0, #sec
-        video_transform=video_preprocessor,
+        time_window = 15.0, #sec
+        video_transform=video_preprocessor_val,
         eeg_transform = fft,
         split = "test"
     )
@@ -155,19 +180,20 @@ def run(
         rank=rank,
     )
 
+    # We don't need shuffle when using DistributedSampler
     training_dataloader = DataLoader(
         dataset=training_dataset,
         batch_size=batch_size,
-        shuffle=False,
+        num_workers=4,
         pin_memory=True,
-        sampler=training_sampler, drop_last=True, # Add drop_last
+        sampler=training_sampler, drop_last=False, # Consider add drop_last
     )
 
     # Val-dataloader shouldn't be sampled by training_sampler
     validation_dataloader = DataLoader(
         dataset=validation_dataset,
+        num_workers=4,
         batch_size=batch_size,
-        shuffle=False,
         pin_memory=True,
         sampler=validation_sampler, drop_last=False,
     )
@@ -247,7 +273,7 @@ def run(
                 new_pos_embed = torch.cat((extra_tokens, pos_tokens), dim=1)
                 checkpoint_model['encoder_audio.pos_embed'] = new_pos_embed
 
-        hicmae_load_state_dict(model, checkpoint_model)
+        _load_state_dict(model, checkpoint_model)
 
     elif args.model == 'tvlt':
         model = torch_model(args, output_dim = training_dataset.output_shape, eeg_channels = training_dataset.eeg_channel_count, img_size=img_size, frames = 32)
@@ -255,7 +281,38 @@ def run(
         print(f'Loading pretrained weights from {pretrained_path}')
 
         checkpoint = torch.load(pretrained_path)
-        model.load_state_dict(checkpoint, strict=False)
+        checkpoint_model = checkpoint.get('model', checkpoint.get('module', checkpoint))
+
+        for k in ['classifier.4.weight', 'classifier.4.bias']:
+            if k in checkpoint_model and k in model.state_dict():
+                if checkpoint_model[k].shape != model.state_dict()[k].shape:
+                    print(f"Removing key {k} due to shape mismatch")
+                    del checkpoint_model[k]
+
+        if 'pos_embed_v' in checkpoint_model:
+            pos_embed = checkpoint_model['pos_embed_v']
+            embedding_size = pos_embed.shape[-1]
+            num_patches = model.patch_embed_v.num_patches
+            orig_size = int(pos_embed.shape[1] ** 0.5)
+            new_size = int(num_patches ** 0.5)
+            if orig_size != new_size:
+                print(f"Interpolating video pos_embed from {orig_size}x{orig_size} to {new_size}x{new_size}")
+                pos_tokens = pos_embed[0].reshape(1, orig_size, orig_size, embedding_size).permute(0, 3, 1, 2)
+                pos_tokens = F.interpolate(pos_tokens, size=(new_size, new_size), mode='bicubic', align_corners=False)
+                pos_tokens = pos_tokens.permute(0, 2, 3, 1).reshape(1, new_size * new_size, embedding_size)
+                checkpoint_model['pos_embed_v'] = pos_tokens
+
+        if 'pos_embed_a' in checkpoint_model:
+            pos_embed = checkpoint_model['pos_embed_a']
+            embedding_size = pos_embed.shape[-1]
+            target_len = model.max_audio_patches
+            if pos_embed.shape[1] != target_len:
+                print(f"Interpolating audio pos_embed from {pos_embed.shape[1]} to {target_len}")
+                pos_tokens = pos_embed.permute(0, 2, 1)
+                pos_tokens = F.interpolate(pos_tokens, size=(target_len,), mode='linear', align_corners=False)
+                checkpoint_model['pos_embed_a'] = pos_tokens.permute(0, 2, 1)
+
+        _load_state_dict(model, checkpoint_model)
 
     else:
         model = torch_model(args,
@@ -264,26 +321,45 @@ def run(
                     eeg_channels = training_dataset.eeg_channel_count,
                     frequency_bins = freq_bin,
         )
-    
+        
+        if args.pretrained:
+            pretrained_path = os.path.join(os.getcwd(), 'pretrained', args.model + '.pth') # ViViT, TimeSFormer
+            print(f'Loading pretrained weights from {pretrained_path}')
+            checkpoint = torch.load(pretrained_path)
+            model.model.load_state_dict(checkpoint, strict=False) # Backbone is defined as the model.model
 
-    device = torch.device("cuda")
-    model = model.to(device)
+    device = torch.device(f"cuda:{rank}")
+    model.to(device)
+    model = DDP(model, device_ids=[rank])
 
     loss_function = nn.CrossEntropyLoss()
+    loss_function.to(device)
 
     optimizer = optim.AdamW(
         params=model.parameters(),
-        lr=learning_rate,
+        lr=learning_rate, eps=1e-8, betas=(0.9, 0.98),
         weight_decay=weight_decay
 )
 
     steps_per_epoch = math.ceil(len(training_dataset) / batch_size)
     total_steps = steps_per_epoch * epochs
+    warmup_steps = int(0.1 * total_steps)  # Choose apporopriate warmup step
 
-    lr_scheduler = CosineScheduler(
+    for param_group in optimizer.param_groups:
+        param_group["initial_lr"] = learning_rate
+
+    # Utlize warmup schedular
+    lr_scheduler = WarmupCosineScheduler(
         optimizer=optimizer,
-        t_total=total_steps,
+        warmup_steps=warmup_steps,
+        total_steps=total_steps,
+        min_lr=learning_rate * 0.1,
     )
+
+    # lr_scheduler = CosineScheduler(
+    #     optimizer=optimizer,
+    #     t_total=total_steps,
+    # )
 
     p_trainer = PTrainer(
         model=model,
@@ -306,32 +382,28 @@ def run(
 
 if "__main__" == __name__:
 
-    # TODO
-    ## Skip the missing video sequence in EAV dataset -> I'll add it during the weekend
-    ## 
-
     parser = argparse.ArgumentParser(description="TimeSFormer")
 
-    parser.add_argument("--epochs", type=int, default=20) # Check the code's feasibility
+    parser.add_argument("--epochs", type=int, default=100) # Check the code's feasibility
     parser.add_argument("--num_gpus", type=int, default=1) # Check multi-gpu
-    parser.add_argument("--batch_size", type=int, default=1)
-    parser.add_argument("--learning_rate", type=float, default=0.01)
-    parser.add_argument("--weight_decay", type=float, default=0.0004)
-    parser.add_argument("--csv_file", type=str, default= "./datasets/updated_fold_csv_files/Emognition_fold_csv/Emognition_dataset_updated_fold0.csv")
+    parser.add_argument("--batch_size", type=int, default=12)
+    parser.add_argument("--learning_rate", type=float, default=5e-5)
+    parser.add_argument("--weight_decay", type=float, default=0.01)
+    parser.add_argument("--csv_file", type=str, default= "./datasets/updated_fold_csv_files/MDMER_fold_csv/MDMER_dataset_updated_fold0.csv")
     parser.add_argument("--checkpoint_dir", type=str, default="./checkpoints")
     parser.add_argument("--pretrained_dir", type=str, default="./pretrained")
-    parser.add_argument('--pretrained', action='store_true', default=True,
+    parser.add_argument('--pretrained', action='store_true', default=False,
                         help='Choose pretrained backbone or scratch for swin and hicmae')
-    parser.add_argument("--experiment_name", type=str, default="emognition_tvlt-stft_b4_e20_res224")
-    parser.add_argument("--dataset", type=str, default="emognition", choices=('eav', 'mdmer', 'emognition'))
-    parser.add_argument("--model", type=str, default="tvlt", choices=('vivit', 'swin', 'tsf', 'hicmae', 'tvlt'))
+    parser.add_argument("--experiment_name", type=str, default="mdmer_vivit-test-eeg_5e-5_b12_e100_res224")
+    parser.add_argument("--dataset", type=str, default="mdmer", choices=('eav', 'mdmer', 'emognition'))
+    parser.add_argument("--model", type=str, default="vivit", choices=('vivit', 'swin', 'tsf', 'hicmae', 'tvlt'))
     parser.add_argument("--port", type=str, default="8008")
-    parser.add_argument("--seed", type=int, default="7254")
-    parser.add_argument("--img_size", type=int, default="224") # In the Nef resource
+    parser.add_argument("--seed", type=int, default=7254)
+    parser.add_argument("--img_size", type=int, default="224")
 
     parser.add_argument('--eeg_signal', action='store_true', default=True,
                         help='Choose video or video+EEG by arg option')
-    parser.add_argument('--fft_mode', type=str, default='Spectrogram', # Consider this on next step
+    parser.add_argument('--fft_mode', type=str, default='Spectrogram',
                         choices=('AbsFFT', 'Spectrogram'), help='Choose FFT transformation method')
 
     args = parser.parse_args()

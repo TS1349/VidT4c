@@ -69,13 +69,6 @@ class VisionTransformer(nn.Module):
             for i in range(self.depth)])
         self.norm = norm_layer(embed_dim)
 
-        # Classifier head
-        self.head = nn.Linear(embed_dim, output_dim) if output_dim > 0 else nn.Identity()
-
-        trunc_normal_(self.pos_embed, std=.02)
-        trunc_normal_(self.cls_token, std=.02)
-        self.apply(self._init_weights)
-
         ## initialization of temporal attention weights
         if self.attention_type == 'divided_space_time':
             i = 0
@@ -86,6 +79,18 @@ class VisionTransformer(nn.Module):
                       nn.init.constant_(m.temporal_fc.weight, 0)
                       nn.init.constant_(m.temporal_fc.bias, 0)
                     i += 1
+                    
+        # Deeper classifier head (same with TVLT model)
+        self.head = nn.Sequential(
+            nn.Linear(embed_dim, embed_dim * 2),
+            nn.LayerNorm(embed_dim * 2),
+            nn.GELU(),
+            nn.Linear(embed_dim * 2, output_dim),
+        )
+
+        trunc_normal_(self.pos_embed, std=.02)
+        trunc_normal_(self.cls_token, std=.02)
+        self.apply(self._init_weights)
 
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
