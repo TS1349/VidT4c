@@ -114,8 +114,8 @@ class VERandomDataset(Dataset):
         video_path = row.facial_video
 
         # Skip missing file compared with csv (after face crop)
-        # The 'EAV/subject4, 5, 18, 20' folder dosen't exist now
-        if any(f"EAV/subject{sid}" in video_path for sid in [4, 5, 18, 20]):
+        # The 'EAV/subject4, 5, 18, 20, 38' folder dosen't exist now
+        if any(f"EAV/subject{sid}" in video_path for sid in [4, 5, 18, 20, 38]):
             return self.__getitem__((idx + 1) % len(self.df))
 
         try:
@@ -141,7 +141,7 @@ class VERandomDataset(Dataset):
 
         if self.video_transform is not None:
             # video = self.video_transform(video)
-            video = torch.stack([self.video_transform(frame) for frame in video])
+            video = torch.stack([self.video_transform(frame) for frame in video]) # Torchvision Compose function is for 'B x C x H x W'
         
         # eeg part:
         eeg_idxs = self._get_corresponding_eeg_idxs(video_idxs, fps)
