@@ -90,7 +90,13 @@ class BridgedVideoSwin4C(nn.Module):
         else:
             self.patch_emb = patch_embed_3c
 
-        self.video_model = swin3d_b(weights=self.args.pretrained,
+
+        if self.args.pretrained:
+            weight = "Swin3D_B_Weights.KINETICS400_V1"
+        else:
+            weight = None
+
+        self.video_model = swin3d_b(weights=weight,
                 patch_embed=self.patch_emb,
                 num_classes=output_dim[0]*output_dim[1])
     

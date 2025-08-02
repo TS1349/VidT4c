@@ -2,6 +2,7 @@ import torch
 from torch import nn
 from einops import rearrange, repeat
 from .module import Attention, PreNorm, FeedForward
+from .weight import trunc_normal_, constant_init_, kaiming_init_
 
 # === PatchEmbed fix ===
 class PatchEmbed(nn.Module):
@@ -112,10 +113,34 @@ class ViViT(nn.Module):
         self.dropout = nn.Dropout(emb_dropout)
         self.pool = pool
 
+        # self.mlp_head = nn.Sequential(
+        #     nn.LayerNorm(dim),
+        #     nn.Linear(dim, num_classes),
+        # )
+
+        # Deeper classifier head (same with TVLT model)
         self.mlp_head = nn.Sequential(
-            nn.LayerNorm(dim),
-            nn.Linear(dim, num_classes)
+            nn.Linear(dim, dim * 2),
+            nn.LayerNorm(dim * 2),
+            nn.GELU(),
+            nn.Linear(dim * 2, num_classes),
         )
+
+        trunc_normal_(self.pos_embedding, std=.02)
+        trunc_normal_(self.space_token, std=.02)
+        trunc_normal_(self.temporal_token, std=.02)
+
+        self.apply(self._init_weights)
+
+    def _init_weights(self, m):
+        if isinstance(m, nn.Linear):
+            trunc_normal_(m.weight, std=.02)
+            if isinstance(m, nn.Linear) and m.bias is not None:
+                nn.init.constant_(m.bias, 0)
+        elif isinstance(m, nn.LayerNorm):
+            nn.init.constant_(m.bias, 0)
+            nn.init.constant_(m.weight, 1.0)
+
 
     def forward(self, x):
         x = self.to_patch_embedding(x)  # [batch, time, num_patches, dim]
