@@ -17,3 +17,4 @@ Using updated_csv_folders (-> mv /datasets/updated_csv_folders) with cropped vid
 
 # TODO
 - Our own framework code
+- This should work for both compute facilites equall well
