@@ -78,8 +78,8 @@ def fill_in(args):
 #SBATCH --hint=nomultithread\n\
 #SBATCH --qos={qos(gpu,debug)}\n\
 #SBATCH --time={max_hour(gpu,debug)}\n\
-#SBATCH --output={model}_{dataset}.out\n\
-#SBATCH --error={model}_{dataset}.err\n\n\n\n\
+#SBATCH --output={model}_{dataset}_{learning_rate[2:]}.out\n\
+#SBATCH --error={model}_{dataset}_{learning_rate[2:]}.err\n\n\n\n\
 module purge\n\
 module load arch/{gpu}\n\
 module load cuda/12.1.0\n\
