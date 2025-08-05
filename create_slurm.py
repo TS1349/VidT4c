@@ -93,13 +93,15 @@ set -x\n\
 srun python -u ./runner.py \\\n\
         --epochs 200\\\n\
         --batch_size {batch_size}\\\n\
-        --learning_rate 0.01\\\n\
-        --weight_decay 0.0004\\\n\
+        --learning_rate 0.1\\\n\
+        --weight_decay 0.001\\\n\
         --csv_file "$fold_csv"\\\n\
         --checkpoint_dir "./checkpoints"\\\n\
         --experiment_name "{model}_{dataset}_{fold}"\\\n\
         --dataset "{dataset}"\\\n\
-        --model "{model}"\n\
+        --model "{model}"\\\n\
+        --eeg_signal False\\\n\
+        --eeg_pretrained True\\\n\
 '
 
 if "__main__" == __name__:
@@ -108,7 +110,7 @@ if "__main__" == __name__:
 
     parser.add_argument("--model",
                         type=str,
-                        default="tvlt",
+                        default="vivit",
                         choices=("vivit", "swin", "tsf", "hicmae", "tvlt"))
 
     parser.add_argument("--dataset",
