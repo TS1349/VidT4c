@@ -216,7 +216,8 @@ class PTrainer:
 
         for epoch in range(epochs):
             self._run_epoch_single(epoch)
-            self._eval()
-            if ((self.current_epoch + 1) % save_every == 0):
-                self._save_checkpoint()
+            if (0 == self.gpu_id):
+                self._eval()
+                if ((self.current_epoch + 1) % save_every == 0):
+                    self._save_checkpoint()
             self.current_epoch += 1

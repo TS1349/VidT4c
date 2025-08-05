@@ -198,11 +198,11 @@ def run(rank, args):
     )
 
     # Add validation sampler
-    validation_sampler = DistributedSampler(
-        dataset=validation_dataset,
-        num_replicas=num_replicas,
-        rank=rank,
-    )
+    # validation_sampler = DistributedSampler(
+    #     dataset=validation_dataset,
+    #     num_replicas=num_replicas,
+    #     rank=rank,
+    # )
 
     # We don't need shuffle when using DistributedSampler
     training_dataloader = DataLoader(
@@ -220,7 +220,7 @@ def run(rank, args):
         num_workers=4,
         batch_size=batch_size,
         pin_memory=True,
-        sampler=validation_sampler,
+        #sampler=validation_sampler,
         drop_last=False,
     )
 
