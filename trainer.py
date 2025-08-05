@@ -143,7 +143,7 @@ class PTrainer:
         # </error_sentinels>
 
         with torch.inference_mode():
-            for idx, sample in enumerate(self.validation_dataloader):
+            for batch_number, sample in enumerate(self.validation_dataloader):
                 batch_size_now = sample["output"].size(0)
                 total_samples += batch_size_now
 
@@ -195,7 +195,7 @@ class PTrainer:
                     pbar.set_postfix_str(f"val_loss={global_loss:.4f}, {acc_str}")
                     pbar.update(1)
                 else:
-                    print(f"V[{epoch}/{idx}]/G[{self.gpu_id}]/val_loss={global_loss:.4f}, {acc_str}")
+                    print(f"V/G[{self.gpu_id}]/E[{epoch}]/B[{batch_number}] : L={batch_loss_value:.4f}; acc={acc_str}")
 
         if (pbar is not None):
             pbar.close()
