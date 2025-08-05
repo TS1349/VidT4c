@@ -120,7 +120,7 @@ class PTrainer:
 
 
 
-    def _eval(self) -> None:
+    def _eval(self,epoch) -> None:
         self.model.eval()
         num_batches = len(self.validation_dataloader)
         total_loss = 0.0
@@ -143,7 +143,7 @@ class PTrainer:
         # </error_sentinels>
 
         with torch.inference_mode():
-            for _, sample in enumerate(self.validation_dataloader):
+            for idx, sample in enumerate(self.validation_dataloader):
                 batch_size_now = sample["output"].size(0)
                 total_samples += batch_size_now
 
@@ -195,7 +195,7 @@ class PTrainer:
                     pbar.set_postfix_str(f"val_loss={global_loss:.4f}, {acc_str}")
                     pbar.update(1)
                 else:
-                    print(f"V/G[{self.gpu_id}]/val_loss={global_loss:.4f}, {acc_str}")
+                    print(f"V[{epoch}/{idx}]/G[{self.gpu_id}]/val_loss={global_loss:.4f}, {acc_str}")
 
         if (pbar is not None):
             pbar.close()
@@ -217,7 +217,7 @@ class PTrainer:
         for epoch in range(epochs):
             self._run_epoch_single(epoch)
             if (0 == self.gpu_id):
-                self._eval()
+                self._eval(epoch)
                 if ((self.current_epoch + 1) % save_every == 0):
                     self._save_checkpoint()
             self.current_epoch += 1
