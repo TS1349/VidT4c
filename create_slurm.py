@@ -64,6 +64,7 @@ def fill_in(args):
     debug = args.debug
     num_gpus = args.num_gpus
     batch_size = args.batch_size
+    learning_rate = args.learning_rate
     return f'\
 #!/bin/bash\n\n\
 #SBATCH --job-name=\
@@ -93,7 +94,7 @@ set -x\n\
 srun python -u ./runner.py \\\n\
         --epochs 200\\\n\
         --batch_size {batch_size}\\\n\
-        --learning_rate 0.1\\\n\
+        --learning_rate {learning_rate}\\\n\
         --weight_decay 0.001\\\n\
         --csv_file "$fold_csv"\\\n\
         --checkpoint_dir "./checkpoints"\\\n\
@@ -138,11 +139,14 @@ if "__main__" == __name__:
     parser.add_argument("--batch_size",
                         type=int,
                         default=32)
+    parser.add_argument("--learning_rate",
+                        type=str,
+                        default="0.01")
 
     args = parser.parse_args()
 
     slurm_script = fill_in(args)
 
-    file_name = f"./{'debug_' if args.debug else ''}{args.model}_{args.dataset}.slurm"
+    file_name = f"./{'debug_' if args.debug else ''}{args.model}_{args.dataset}_{args.learning_rate[2:]}.slurm"
     with open(file_name, "w") as file:
         file.write(slurm_script)
