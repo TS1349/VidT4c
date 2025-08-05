@@ -418,7 +418,8 @@ if "__main__" == __name__:
     parser.add_argument("--csv_file", type=str, default= "./datasets/updated_fold_csv_files/MDMER_fold_csv/MDMER_dataset_updated_fold0.csv")
     parser.add_argument("--checkpoint_dir", type=str, default="./checkpoints")
     parser.add_argument("--pretrained_dir", type=str, default="./pretrained")
-    parser.add_argument('--pretrained', action='store_true', default=False,
+    parser.add_argument('--pretrained',
+                        action='store_true',
                         help='Choose pretrained backbone or scratch for swin and hicmae')
     parser.add_argument("--experiment_name", type=str, default="mdmer_vivit-test-eeg_5e-5_b12_e100_res224")
     parser.add_argument("--dataset", type=str, default="mdmer", choices=('eav', 'mdmer', 'emognition'))
@@ -427,7 +428,8 @@ if "__main__" == __name__:
     parser.add_argument("--seed", type=int, default=7254)
     parser.add_argument("--img_size", type=int, default="224")
 
-    parser.add_argument('--eeg_signal', action='store_true', default=True,
+    parser.add_argument('--eeg_signal',
+                        action='store_true',
                         help='Choose video or video+EEG by arg option')
     parser.add_argument('--fft_mode', type=str, default='Spectrogram',
                         choices=('AbsFFT', 'Spectrogram'), help='Choose FFT transformation method')

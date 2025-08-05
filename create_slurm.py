@@ -100,8 +100,7 @@ srun python -u ./runner.py \\\n\
         --experiment_name "{model}_{dataset}_{fold}"\\\n\
         --dataset "{dataset}"\\\n\
         --model "{model}"\\\n\
-        --eeg_signal False\\\n\
-        --pretrained True\\\n\
+        --pretrained \n\
 '
 
 if "__main__" == __name__:
