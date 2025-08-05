@@ -101,7 +101,7 @@ srun python -u ./runner.py \\\n\
         --dataset "{dataset}"\\\n\
         --model "{model}"\\\n\
         --eeg_signal False\\\n\
-        --eeg_pretrained True\\\n\
+        --pretrained True\\\n\
 '
 
 if "__main__" == __name__:
