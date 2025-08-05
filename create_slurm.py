@@ -98,7 +98,7 @@ srun python -u ./runner.py \\\n\
         --weight_decay 0.001\\\n\
         --csv_file "$fold_csv"\\\n\
         --checkpoint_dir "./checkpoints"\\\n\
-        --experiment_name "{model}_{dataset}_{fold}"\\\n\
+        --experiment_name "{model}_{dataset}_{learning_rate[2:]}"\\\n\
         --dataset "{dataset}"\\\n\
         --model "{model}"\\\n\
         --pretrained \n\
@@ -129,7 +129,7 @@ if "__main__" == __name__:
                         choices=("a100", "h100"))
 
     parser.add_argument("--debug",
-                        type=bool,
+                        action="store_true",
                         default=False)
 
     parser.add_argument("--num_gpus",
