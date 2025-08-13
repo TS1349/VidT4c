@@ -3,12 +3,12 @@
 Please train below things on the server based on the updated code.
 Using updated_csv_folders (-> mv /datasets/updated_csv_folders) with cropped videos.
 
-# Train lists
+# Train Parameters
 - You should set learning rate as 1e-4 ~ 1e-5 and weight_decay as 5e-5 with existing training code. Please find the appropriate learning parameters including lrscheduler_step, lrscheduler_decay.
 - The prefixed option value seems good training with 4 batch size.
 - Recommend setup for all models -> Batch: 32, Epochs 50
 
-  
+# Train Lists
 - Only video models for 3 datasets (3x3 - fold0 csv) -> Set args.eeg_signal = False
 - EEG + Video models for 3 datasets (3x3 - fold0 csv) -> Set args.eeg_signal = True
 
