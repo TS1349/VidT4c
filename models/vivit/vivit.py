@@ -41,8 +41,7 @@ class BridgedViViT4C(nn.Module):
 
         self.image_size = image_size
         self.output_dim = output_dim
-        if output_dim[1] == 1:
-            self.output_dim = (output_dim[0],)
+        self.num_classes = output_dim[0] * output_dim[1]
 
         if self.args.eeg_signal:
             if self.args.fft_mode == "AbsFFT":
@@ -54,9 +53,8 @@ class BridgedViViT4C(nn.Module):
                     hidden_features = hidden_dim,
                     out_features = out_dim
                 )
-
             elif self.args.fft_mode == "Spectrogram": 
-                self.eeg2fps = nn.Conv2d(eeg_channels * 2, 32, kernel_size=3, stride=1, padding=1, bias=True)
+                self.eeg2fps = nn.Conv2d(eeg_channels, 32, kernel_size=3, stride=1, padding=1, bias=True)
 
             self.input_ch = 4
         else:
@@ -66,7 +64,7 @@ class BridgedViViT4C(nn.Module):
         self.model = ViViT(
             image_size=image_size,
             patch_size=16,
-            num_classes=output_dim[0] * output_dim[1],
+            num_classes=self.num_classes,
             num_frames=32,
             dim=768,
             depth=12,
@@ -90,8 +88,7 @@ class BridgedViViT4C(nn.Module):
                 new_shape = eeg.shape[:2] + (1, self.image_size, self.image_size)
                 eeg = eeg.view(new_shape)
             elif self.args.fft_mode == "Spectrogram": 
-                eeg = F.interpolate(sample["eeg"], size=(self.image_size, self.image_size), mode='bilinear', align_corners=False)
-                eeg = self.eeg2fps(eeg).unsqueeze(2)
+                eeg = self.eeg2fps(sample["eeg"]).unsqueeze(2)
             
             four_channel_video = torch.cat([sample["video"], eeg], dim = -3)
             four_channel_video.transpose_(-3, -4)
@@ -99,7 +96,10 @@ class BridgedViViT4C(nn.Module):
         else:
             output = self.model(sample["video"].transpose_(-3, -4))
 
-        new_out_shape = output.shape[:-1] + self.output_dim
-        output = output.view(new_out_shape)
+        if self.args.dataset == 'emognition' or 'mdmer':
+            output_v = output[:, :self.output_dim[0]].unsqueeze(-1)
+            output_a = output[:, self.output_dim[0]:].unsqueeze(-1)
+            output = torch.concat((output_v, output_a), dim=-1)
+
         
         return output

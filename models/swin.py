@@ -83,7 +83,7 @@ class BridgedVideoSwin4C(nn.Module):
                 )
 
             elif self.args.fft_mode == "Spectrogram": 
-                self.eeg2fps = nn.Conv2d(eeg_channels * 2, 32, kernel_size=3, stride=1, padding=1, bias=True)
+                self.eeg2fps = nn.Conv2d(eeg_channels, 32, kernel_size=3, stride=1, padding=1, bias=True)
             
             self.patch_emb = patch_embed_4c
 
@@ -109,9 +109,7 @@ class BridgedVideoSwin4C(nn.Module):
                 new_shape = eeg.shape[:2] + (1, self.image_size, self.image_size)
                 eeg = eeg.view(new_shape)
             elif self.args.fft_mode == "Spectrogram": 
-                eeg = x["eeg"]
-                eeg = F.interpolate(eeg, size=(self.image_size, self.image_size), mode='bilinear', align_corners=False)
-                eeg = self.eeg2fps(eeg).unsqueeze(2)
+                eeg = self.eeg2fps(x["eeg"]).unsqueeze(2)
             
             four_channel_video = torch.cat([x["video"], eeg], dim = -3)
             four_channel_video.transpose_(-3, -4)
@@ -119,6 +117,9 @@ class BridgedVideoSwin4C(nn.Module):
         else:
             output = self.video_model(x["video"].transpose_(-3, -4))
 
-        new_out_shape = output.shape[:-1] + self.output_dim
-        output = output.view(new_out_shape)
+        if self.args.dataset == 'emognition' or 'mdmer':
+            output_v = output[:, :self.output_dim[0]].unsqueeze(-1)
+            output_a = output[:, self.output_dim[0]:].unsqueeze(-1)
+            output = torch.concat((output_v, output_a), dim=-1)
+
         return output

@@ -13,9 +13,9 @@ class AbsFFT(object):
 
 
 class STFT(object):
-    def __init__(self, n_fft=127, hop_length=16, visualize=False):
+    # def __init__(self, n_fft=127, hop_length=16, visualize=False):
+    def __init__(self, n_fft=127, visualize=False):
         self.n_fft = n_fft
-        self.hop_length = hop_length # Based on the torch documentation, hop_length = n_fft / 4
         self.visualize = visualize
         self.window = torch.hann_window(n_fft)
 
@@ -24,25 +24,26 @@ class STFT(object):
         sample shape: (num_frames, num_time, num_channels)
         output shape: (1, num_channels*2, freq_bins, time_steps)
         """
-        _, _, num_channels = sample.shape
-
         # Flatten over time
-        x = sample.permute(2, 0, 1).reshape(num_channels, -1)  # (num_channels, total_time)
+        x = sample.transpose(1, 0)
+        num_channels, _ = x.shape
 
         # STFT
         stfted = torch.stft(
             x,
             n_fft=self.n_fft,
-            hop_length=self.hop_length,
+            # hop_length=self.hop_length, # Based on the torch documentation, hop_length = n_fft / 4 (overlap ratio: 75%)
             window=self.window,
             return_complex=True
         )  # (num_channels, freq_bins, time_steps)
 
+        # Do not use phase at EEG singal
         magnitude = torch.log1p(torch.abs(stfted))
-        phase = torch.angle(stfted)
 
-        mag_phase = torch.stack([magnitude, phase], dim=1)  # (C, 2, F, T)
-        mag_phase = mag_phase.view(num_channels * 2, magnitude.shape[2], magnitude.shape[1])  # (2*C, T, F)
+        # phase = torch.angle(stfted)
+        # mag_phase = torch.stack([magnitude, phase], dim=1)  # (C, 2, F, T)
+        # mag_phase = mag_phase.view(num_channels * 2, magnitude.shape[2], magnitude.shape[1])  # (2*C, T, F)
+        mag_phase = magnitude.transpose(2, 1)
 
         if self.visualize:
             for ch in range(num_channels):
@@ -81,7 +82,23 @@ class STFT(object):
 
         fig.tight_layout()
 
-        path = f"./STFT_plot/FFT_interp_ch{ch}.png"
+        path = f"/home/jakim/research/emotion/VidT4c-main/STFT_plot/FFT_interp_ch{ch}.png"
         fig.savefig(path)
         print(f"[✓] Saved: {path}")
         plt.close(fig)
+
+
+class STFTFixedSize(STFT):
+    def __init__(self, n_fft=128, target_freq=128, target_time=256, visualize=False):
+        super().__init__(n_fft=n_fft, visualize=visualize)
+        self.target_freq = target_freq
+        self.target_time = target_time
+
+    def __call__(self, sample):
+        mag_phase = super().__call__(sample)  # (C, T, F)
+        mag_phase_up = F.interpolate(
+            mag_phase.unsqueeze(0), 
+            size=(self.target_time, self.target_freq), 
+            mode='bilinear', align_corners=False
+        ).squeeze(0)
+        return mag_phase_up

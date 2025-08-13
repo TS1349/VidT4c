@@ -73,15 +73,10 @@ class PTrainer:
         torch.set_grad_enabled(True)
         self.model.train()
 
-        avg_loss = 0
-
         self.training_dataloader.sampler.set_epoch(epoch)
-        if (tqdm is not None) and self.use_tqdm:
-            pbar = tqdm.tqdm(total=len(self.training_dataloader), desc=f"Train Epoch {epoch}")
-        else:
-            pbar = None
 
         total_loss = 0
+        pbar = tqdm(total=len(self.training_dataloader), desc=f"Train Epoch {epoch}")
 
         for batch_number, sample in enumerate(self.training_dataloader):
             # Move sample to device
@@ -92,7 +87,10 @@ class PTrainer:
             output = self.model(sample)
             target = sample["output"]
             
-            loss = self.loss_function(output.float(), target)
+            # # loss = self.loss_function(output.float(), target)
+            v_loss = self.loss_function(output[:, :, 0].float(), target[:, 0])
+            a_loss = self.loss_function(output[:, :, 1].float(), target[:, 1])
+            loss = 0.5 * (v_loss + a_loss)
 
             # Check actual prediction class for each sample
             # print("Pred:", output.argmax(1), "Target:",target)
@@ -138,7 +136,6 @@ class PTrainer:
         global_loss = -1.0
         val_acc = -1.0
         aro_acc = -1.0
-        dom_acc = -1.0
         avg_acc = -1.0
         # </error_sentinels>
 
@@ -152,7 +149,10 @@ class PTrainer:
 
                 target = sample["output"]
                 predictions = self.model(sample)
-                batch_loss_value = self.loss_function(predictions, target)
+                
+                v_loss = self.loss_function(predictions[:, :, 0].float(), target[:, 0])
+                a_loss = self.loss_function(predictions[:, :, 1].float(), target[:, 1])
+                batch_loss_value = 0.5 * (v_loss + a_loss)
 
                 total_loss += batch_loss_value * batch_size_now
                 global_loss = total_loss / total_samples
@@ -161,24 +161,24 @@ class PTrainer:
                 # print(pred, target)
 
                 # Devide accuracy at each emotion anntation
-                if pred.dim() == 2 and pred.size(1) == 3:
+                if pred.dim() == 2 and pred.size(1) == 2:
                     # [valence, arousal, dominance / motivation] -> MDMER, Emognition
                     if total_correct is None:
-                        total_correct = {"valence": 0, "arousal": 0, "dominance": 0}
+                        total_correct = {"valence": 0, "arousal": 0}
 
                     val_correct = (pred[:, 0] == target[:, 0]).sum().item()
                     aro_correct = (pred[:, 1] == target[:, 1]).sum().item()
-                    dom_correct = (pred[:, 2] == target[:, 2]).sum().item()
+
+                    # val_correct = (v_expect == target[:, 0]).sum().item()
+                    # aro_correct = (a_expect == target[:, 1]).sum().item()
 
                     total_correct["valence"] += val_correct
                     total_correct["arousal"] += aro_correct
-                    total_correct["dominance"] += dom_correct
 
                     val_acc = total_correct["valence"] / total_samples
                     aro_acc = total_correct["arousal"] / total_samples
-                    dom_acc = total_correct["dominance"] / total_samples
 
-                    acc_str = f"Val: {val_acc:.3f} | Aro: {aro_acc:.3f} | Dom: {dom_acc:.3f}"
+                    acc_str = f"Val: {val_acc:.3f} | Aro: {aro_acc:.3f}"
 
                 elif pred.dim() == 1:
                     # Category classification -> EAV
@@ -203,8 +203,8 @@ class PTrainer:
         # Save the validation logger in the checkpoints dir
         with open(self.val_log_path, "a") as f:
             if (pred is not None):
-                if pred.dim() == 2 and pred.size(1) == 3:
-                    f.write(f"{self.current_epoch},{global_loss:.6f},{val_acc:.6f},{aro_acc:.6f},{dom_acc:.6f}\n")
+                if pred.dim() == 2 and pred.size(1) == 2:
+                    f.write(f"{self.current_epoch},{global_loss:.6f},{val_acc:.6f},{aro_acc:.6f}\n")
                 else:
                     f.write(f"{self.current_epoch},{global_loss:.6f},{avg_acc:.6f}\n")
             else:

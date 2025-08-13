@@ -16,9 +16,9 @@ import numpy as np
 
 from world_info import init_distributed_mode
 from trainer import PTrainer
-from models import BridgedTimeSFormer4C, BridgedViViT4C, BridgedVideoSwin4C, AudioVisionTransformer, TVLTTransformer
+from models import BridgedTimeSFormer4C, BridgedViViT4C, BridgedVideoSwin4C, AudioVisionTransformer, TVLTTransformer, VEMT
 from dataloader import EAVDataset, EmognitionDataset, MDMERDataset
-from dataloader.transforms import AbsFFT, STFT
+from dataloader.transforms import AbsFFT, STFT, STFTFixedSize
 from scheduler import CosineScheduler
 
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -36,6 +36,8 @@ def get_torch_model(name):
         return AudioVisionTransformer
     elif name == "tvlt":
         return TVLTTransformer
+    elif name == "vemt":
+        return VEMT
     else:
         raise Exception("Wrong model name")
 
@@ -173,7 +175,7 @@ def run(rank, args):
         fft = AbsFFT(dim=-2)
         freq_bin = 64
     elif fft_mode == "Spectrogram":
-        fft = STFT()
+        fft = STFTFixedSize()
         freq_bin = 128 * 256
 
     training_dataset = torch_dataset(
@@ -198,30 +200,28 @@ def run(rank, args):
     )
 
     # Add validation sampler
-    # validation_sampler = DistributedSampler(
-    #     dataset=validation_dataset,
-    #     num_replicas=num_replicas,
-    #     rank=rank,
-    # )
+    validation_sampler = DistributedSampler(
+        dataset=validation_dataset,
+        num_replicas=args.num_gpus,
+        rank=rank,
+    )
 
     # We don't need shuffle when using DistributedSampler
     training_dataloader = DataLoader(
         dataset=training_dataset,
         batch_size=batch_size,
-        num_workers=4,
+        num_workers=8,
         pin_memory=True,
-        sampler=training_sampler,
-        drop_last=True, # Add drop_last
+        sampler=training_sampler, drop_last=False, # Consider add drop_last
     )
 
     # Val-dataloader shouldn't be sampled by training_sampler
     validation_dataloader = DataLoader(
         dataset=validation_dataset,
-        num_workers=4,
+        num_workers=8,
         batch_size=batch_size,
         pin_memory=True,
-        #sampler=validation_sampler,
-        drop_last=False,
+        sampler=validation_sampler, drop_last=False,
     )
 
 
@@ -363,23 +363,38 @@ def run(rank, args):
 
     optimizer = optim.AdamW(
         params=model.parameters(),
-        lr=learning_rate, eps=1e-8, betas=(0.9, 0.98),
+        lr=learning_rate, eps=1e-8, betas=(0.9, 0.999),
         weight_decay=weight_decay
 )
 
     steps_per_epoch = math.ceil(len(training_dataset) / batch_size)
     total_steps = steps_per_epoch * epochs
-    warmup_steps = int(0.1 * total_steps)  # Choose apporopriate warmup step
+    warmup_steps = int(0.1 * total_steps)  # Choose apporopriate warmup ste (0.1)
 
     for param_group in optimizer.param_groups:
         param_group["initial_lr"] = learning_rate
+    
+    milestone_epochs = list(range(args.lrscheduler_start, 1000, args.lrscheduler_step))
+    milestone_steps = [m * steps_per_epoch for m in milestone_epochs]  # step index
 
-    # Utlize warmup schedular
-    lr_scheduler = WarmupCosineScheduler(
-        optimizer=optimizer,
-        warmup_steps=warmup_steps,
-        total_steps=total_steps,
-        min_lr=learning_rate * 0.1,
+    decay = args.lrscheduler_decay  # ex) 0.75
+
+    def multistep_with_warmup_lambda(global_step: int):
+        if global_step < warmup_steps:
+            return float(global_step + 1) / float(max(1, warmup_steps))
+
+        # 2) decay^k
+        k = 0
+        for ms in milestone_steps:
+            if global_step >= ms:
+                k += 1
+            else:
+                break
+        return decay ** k
+
+    lr_scheduler = torch.optim.lr_scheduler.LambdaLR(
+        optimizer,
+        lr_lambda=multistep_with_warmup_lambda
     )
 
     # lr_scheduler = CosineScheduler(
@@ -389,7 +404,7 @@ def run(rank, args):
 
     p_trainer = PTrainer(
         model=model,
-        lr_scheduler=lr_scheduler,
+        lr_scheduler = lr_scheduler,
         training_dataloader=training_dataloader,
         validation_dataloader=validation_dataloader,
         optimizer=optimizer,
@@ -410,29 +425,39 @@ if "__main__" == __name__:
 
     parser = argparse.ArgumentParser(description="TimeSFormer")
 
-    parser.add_argument("--epochs", type=int, default=100) # Check the code's feasibility
+    parser.add_argument("--epochs", type=int, default=50) # Check the code's feasibility
     parser.add_argument("--num_gpus", type=int, default=1) # Check multi-gpu
-    parser.add_argument("--batch_size", type=int, default=12)
-    parser.add_argument("--learning_rate", type=float, default=5e-5)
-    parser.add_argument("--weight_decay", type=float, default=0.01)
+    parser.add_argument("--batch_size", type=int, default=4)
+
+    parser.add_argument("--lrscheduler_start", type=float, default=5) # same with warmup epoch
+    parser.add_argument("--lrscheduler_step", type=float, default=10)
+    parser.add_argument("--lrscheduler_decay", type=float, default=0.75) 
+
+    parser.add_argument("--learning_rate", type=float, default=1e-5) # 1e-5: transformer, 1e-3: mamba only
+    parser.add_argument("--weight_decay", type=float, default=5e-5) # 5e-5
     parser.add_argument("--csv_file", type=str, default= "./datasets/updated_fold_csv_files/MDMER_fold_csv/MDMER_dataset_updated_fold0.csv")
     parser.add_argument("--checkpoint_dir", type=str, default="./checkpoints")
     parser.add_argument("--pretrained_dir", type=str, default="./pretrained")
-    parser.add_argument('--pretrained',
-                        action='store_true',
+    parser.add_argument('--pretrained', action='store_true', default=True,
                         help='Choose pretrained backbone or scratch for swin and hicmae')
-    parser.add_argument("--experiment_name", type=str, default="mdmer_vivit-test-eeg_5e-5_b12_e100_res224")
+    parser.add_argument("--experiment_name", type=str, default="mdmer-vemt-va5_gcn-two_mile5-0.75_1e-5-5e-5-m0.1_b4_e50_res224")
     parser.add_argument("--dataset", type=str, default="mdmer", choices=('eav', 'mdmer', 'emognition'))
-    parser.add_argument("--model", type=str, default="vivit", choices=('vivit', 'swin', 'tsf', 'hicmae', 'tvlt'))
-    parser.add_argument("--port", type=str, default="8008")
+    parser.add_argument("--model", type=str, default="vemt", choices=('vivit', 'swin', 'tsf', 'hicmae', 'tvlt', 'vemt'))
+    parser.add_argument("--port", type=str, default="20022")
     parser.add_argument("--seed", type=int, default=7254)
     parser.add_argument("--img_size", type=int, default="224")
 
-    parser.add_argument('--eeg_signal',
-                        action='store_true',
-                        help='Choose video or video+EEG by arg option')
+    parser.add_argument('--eeg_signal', action='store_true', default=True,
+                        help='Choose video+EEG input or model')
+    parser.add_argument('--set_eeg_only', action='store_true', default=False,
+                        help='Using only eeg in VEMT')
+    parser.add_argument('--set_video_only', action='store_true', default=False,
+                        help='Using only video in VEMT')
     parser.add_argument('--fft_mode', type=str, default='Spectrogram',
                         choices=('AbsFFT', 'Spectrogram'), help='Choose FFT transformation method')
+    parser.add_argument('--gcn', action='store_true', default=True,
+                    help='Using gcn as classifier')
+    
     parser.add_argument('--server', type=str, default='j_zay', choices=('j_zay', 'nef'), help='Choose which server for appropriate settings')
 
     args = parser.parse_args()

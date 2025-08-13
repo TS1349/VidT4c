@@ -8,6 +8,18 @@ from .layers import Block
 from .layers import PatchEmbed
 from .layers.utils import trunc_normal_
 
+class Pooler(nn.Module):
+    def __init__(self, hidden_size):
+        super().__init__()
+        self.dense = nn.Linear(hidden_size, hidden_size)
+        self.activation = nn.Tanh()
+
+    def forward(self, hidden_states):
+        first_token_tensor = hidden_states[:, 0]
+        pooled_output = self.dense(first_token_tensor)
+        pooled_output = self.activation(pooled_output)
+        return pooled_output
+
 class VisionTransformer(nn.Module):
     """ Vision Transformere
     """
@@ -81,12 +93,13 @@ class VisionTransformer(nn.Module):
                     i += 1
                     
         # Deeper classifier head (same with TVLT model)
-        self.head = nn.Sequential(
-            nn.Linear(embed_dim, embed_dim * 2),
-            nn.LayerNorm(embed_dim * 2),
-            nn.GELU(),
-            nn.Linear(embed_dim * 2, output_dim),
-        )
+        # self.head = nn.Sequential(
+        #     nn.Linear(embed_dim, embed_dim * 2),
+        #     nn.LayerNorm(embed_dim * 2),
+        #     nn.GELU(),
+        #     nn.Linear(embed_dim * 2, output_dim),
+        # )
+        self.head = nn.Linear(embed_dim, output_dim)
 
         trunc_normal_(self.pos_embed, std=.02)
         trunc_normal_(self.cls_token, std=.02)

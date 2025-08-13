@@ -3,6 +3,7 @@ from .vivit import BridgedViViT4C
 from .swin import BridgedVideoSwin4C
 from .hicmae import AudioVisionTransformer
 from .tvlt import TVLTTransformer
+from .vemt import VEMT
 
 __all__ = [
     "BridgedTimeSFormer4C",
@@ -10,4 +11,5 @@ __all__ = [
     "BridgedVideoSwin4C",
     'AudioVisionTransformer',
     "TVLTTransformer",
+    "VEMT"
 ]

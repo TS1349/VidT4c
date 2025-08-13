@@ -80,7 +80,7 @@ class ViViT(nn.Module):
                  dim=192,
                  depth=4,
                  heads=3,
-                 pool='cls', 
+                 pool='mean', 
                  in_channels=3,
                  dim_head=64,
                  dropout=0.,
@@ -113,18 +113,15 @@ class ViViT(nn.Module):
         self.dropout = nn.Dropout(emb_dropout)
         self.pool = pool
 
-        # self.mlp_head = nn.Sequential(
-        #     nn.LayerNorm(dim),
-        #     nn.Linear(dim, num_classes),
-        # )
+        self.mlp_head = nn.Linear(dim, num_classes)
 
         # Deeper classifier head (same with TVLT model)
-        self.mlp_head = nn.Sequential(
-            nn.Linear(dim, dim * 2),
-            nn.LayerNorm(dim * 2),
-            nn.GELU(),
-            nn.Linear(dim * 2, num_classes),
-        )
+        # self.mlp_head = nn.Sequential(
+        #     nn.Linear(dim, dim * 2),
+        #     nn.LayerNorm(dim * 2),
+        #     nn.GELU(),
+        #     nn.Linear(dim * 2, self.num_classes),
+        # )
 
         trunc_normal_(self.pos_embedding, std=.02)
         trunc_normal_(self.space_token, std=.02)
@@ -163,3 +160,4 @@ class ViViT(nn.Module):
         x = x.mean(dim=1) if self.pool == 'mean' else x[:, 0]
 
         return self.mlp_head(x)
+

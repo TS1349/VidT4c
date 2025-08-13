@@ -724,8 +724,8 @@ class AudioVisionTransformer(nn.Module):
             self.encoder = None
             print(f"==> Warning: video-specific encoder is not used!!!")
 
-        # Naively reduce the eeg channels
-        self.eeg_reduce = nn.Conv2d(eeg_channels * 2, 1, kernel_size=3, stride=1, padding=1, bias=True)
+        # # Naively reduce the eeg channels
+        # self.eeg_reduce = nn.Conv2d(eeg_channels * 2, 1, kernel_size=3, stride=1, padding=1, bias=True)
 
         # audio encoder
         self.encoder_depth_audio = depth_audio
@@ -850,12 +850,13 @@ class AudioVisionTransformer(nn.Module):
     def forward(self, sample, save_feature=False):
         x = sample['video'].transpose(-3, -4)
         x_eeg = sample['eeg']
-        x_eeg = F.interpolate(x_eeg, size=(256, 128), mode='bilinear', align_corners=False)
-        x_eeg = self.eeg_reduce(x_eeg)
         x = self.forward_features(x, x_eeg) # (B, C)
 
         output = self.head(x)
         
-        new_out_shape = output.shape[:-1] + self.output_dim
-        class_output = output.view(new_out_shape)
-        return class_output # (B, C)
+        if self.args.dataset == 'emognition' or 'mdmer':
+            output_v = output[:, :self.output_dim[0]].unsqueeze(-1)
+            output_a = output[:, self.output_dim[0]:].unsqueeze(-1)
+            output = torch.concat((output_v, output_a), dim=-1)
+
+        return output # (B, C)

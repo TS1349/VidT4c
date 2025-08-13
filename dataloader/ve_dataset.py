@@ -61,7 +61,17 @@ class VERandomDataset(Dataset):
         # returns 3 int32 class ids starting from 0
         self_annotation = row.self_annotation[1:-1].split(r",")
         self_annotation = [ int(entry) - 1 for entry in self_annotation ]
-        return torch.tensor(self_annotation, dtype = torch.int64)
+
+        # bin mapping: 0-1→0, 2-3→1, 4→2, 5-6→3, 7-8→4
+        mapping = {
+            0: 0, 1: 0,
+            2: 1, 3: 1,
+            4: 2,
+            5: 3, 6: 3,
+            7: 4, 8: 4
+        }
+        va_labels = [mapping[val] for val in self_annotation[:2]]  # Only valence, arousal
+        return torch.tensor(va_labels, dtype=torch.int64)
 
     def _get_ctgr_labels(self, row):
         return torch.tensor(row.label_id, dtype = torch.int64)
@@ -77,46 +87,55 @@ class VERandomDataset(Dataset):
         return [ round(start_idx + i * delta / (final_number -1)) for i in range(final_number) ]
     
     def _get_random_frame_idxs(self, total_frames, fps):
-        num_frames_in_window = math.floor(fps * self.time_window)
+        # num_frames_in_window = math.floor(fps * self.time_window)
 
-        lower_bound = math.ceil((num_frames_in_window / (self.num_out_frames - 1)))
-        upper_bound = total_frames - num_frames_in_window - lower_bound - 1 # since num_frames_in_window is floored
+        # lower_bound = math.ceil((num_frames_in_window / (self.num_out_frames - 1)))
+        # upper_bound = total_frames - num_frames_in_window - lower_bound - 1 # since num_frames_in_window is floored
 
-        random_start_idx = torch_random_int(
-            low = lower_bound,
-            high = upper_bound, # ! low + 32 x 6.4
-            )
+        # random_start_idx = torch_random_int(
+        #     low = lower_bound,
+        #     high = upper_bound, # ! low + 32 x 6.4
+        #     )
         
+        # idxs = VERandomDataset._decimate_idxs(
+        #     start_idx = random_start_idx,
+        #     end_idx = random_start_idx + num_frames_in_window,
+        #     final_number=self.num_out_frames)
+
         idxs = VERandomDataset._decimate_idxs(
-            start_idx = random_start_idx,
-            end_idx = random_start_idx + num_frames_in_window,
-            final_number=self.num_out_frames)
+            start_idx = 5,
+            end_idx = total_frames - 5,
+            final_number=self.num_out_frames)        
 
         return idxs
     
     def _get_corresponding_eeg_idxs(self, frame_idxs, fps):
-        num_samples_sub_window = round(self.time_sub_window * self.eeg_sampling_rate)
+        # num_samples_sub_window = round(self.time_sub_window * self.eeg_sampling_rate)
 
-        eeg_idxs = [ math.floor((idx  * self.eeg_sampling_rate / fps)) - num_samples_sub_window // 2
-                    for idx in frame_idxs ]
-        eeg_idxs.append(eeg_idxs[-1] + num_samples_sub_window)
+        # eeg_idxs = [ math.floor((idx  * self.eeg_sampling_rate / fps)) - num_samples_sub_window // 2
+        #             for idx in frame_idxs ]
+        # eeg_idxs.append(eeg_idxs[-1] + num_samples_sub_window)
 
-        decimated_eeg_idxs_list = [ VERandomDataset._decimate_idxs(
-            start_idx = eeg_idxs[i],
-            end_idx = eeg_idxs[i+1],
-            final_number=self.num_out_eeg
-            ) for i in range(len(eeg_idxs)-1) ]
+        # decimated_eeg_idxs_list = [ VERandomDataset._decimate_idxs(
+        #     start_idx = eeg_idxs[i],
+        #     end_idx = eeg_idxs[i+1],
+        #     final_number=self.num_out_eeg
+        #     ) for i in range(len(eeg_idxs)-1) ]
+        
+        start_eeg_idx = math.floor(frame_idxs[0] * self.eeg_sampling_rate / fps)
+        end_eeg_idx = math.floor(frame_idxs[-1] * self.eeg_sampling_rate / fps)
 
-        return decimated_eeg_idxs_list
+        eeg_idxs = list(range(start_eeg_idx, end_eeg_idx + 1))
+
+        return eeg_idxs
+
 
     def __getitem__(self, idx):
         row = self.df.iloc[idx]
         video_path = row.facial_video
 
-        # Skip missing file compared with csv (after face crop)
-        # The 'EAV/subject4, 5, 18, 20, 38' folder dosen't exist now
         if any(f"EAV/subject{sid}" in video_path for sid in [4, 5, 18, 20, 38]):
-            return self.__getitem__((idx + 1) % len(self.df))
+            return self.__getitem__((idx + 1) % len(self.df))      
 
         try:
             video, _, metadata = read_video(
@@ -141,9 +160,8 @@ class VERandomDataset(Dataset):
 
         if self.video_transform is not None:
             # video = self.video_transform(video)
-            video = torch.stack([self.video_transform(frame) for frame in video]) # Torchvision Compose function is for 'B x C x H x W'
+            video = torch.stack([self.video_transform(frame) for frame in video])
         
-        # eeg part:
         eeg_idxs = self._get_corresponding_eeg_idxs(video_idxs, fps)
         eeg = eeg[eeg_idxs,...]
 
@@ -155,16 +173,6 @@ class VERandomDataset(Dataset):
 
         # final outputs: (start with 0)
         output = self._get_label(row)
-        #print(video_idxs)
-        #print(eeg_idxs)
-
-        #mean_time_video = [ idx / fps for idx in video_idxs]
-        #mean_time_eeg = [ (idxs[0] + idxs[-1]) / 2 / self.eeg_sampling_rate for idxs in eeg_idxs ]
-        #print(mean_time_video)
-        #print(mean_time_eeg)
-        
-        #time_diff = [ abs(mean_time_eeg[i] - mean_time_video[i]) for i in range(self.num_out_frames)]
-        #print(f"{max(time_diff) / self.time_sub_window * 100}%")
 
         return {"video" : video,
                 "eeg" : eeg,
@@ -222,7 +230,7 @@ class MDMERDataset(VERandomDataset):
                 eeg_transform = eeg_transform,
                 num_out_frames = num_out_frames,
                 num_out_eeg = num_out_eeg,
-                output_shape = (9,3),
+                output_shape = (5,2),
                 eeg_channel_count = 18,
         )
 
@@ -249,6 +257,6 @@ class EmognitionDataset(VERandomDataset):
                 eeg_transform = eeg_transform,
                 num_out_frames = num_out_frames,
                 num_out_eeg = num_out_eeg,
-                output_shape = (9,3),
+                output_shape = (5,2),
                 eeg_channel_count = 4,
         )

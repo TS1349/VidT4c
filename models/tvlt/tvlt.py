@@ -202,10 +202,9 @@ class TVLTTransformer(nn.Module):
             nn.GELU(),
             nn.Linear(hs * 2, self.num_classes),
         )
-        # self.classifier.apply(self.init_weights_classify)
+        self.classifier.apply(self.init_weights_classify)
 
-
-    def init_weights_classify(module):
+    def init_weights_classify(self, module):
         if isinstance(module, (nn.Linear, nn.Embedding)):
             module.weight.data.normal_(mean=0.0, std=0.02)
         elif isinstance(module, nn.LayerNorm):
@@ -215,38 +214,6 @@ class TVLTTransformer(nn.Module):
         if isinstance(module, nn.Linear) and module.bias is not None:
             module.bias.data.zero_()
 
-    def init_weights(self, ):
-        # initialization
-        # initialize (and freeze) pos_embed by sin-cos embedding
-        std = 0.02
-
-        # initialize patch_embed like nn.Linear (instead of nn.Conv2d)
-        w = self.patch_embed_v.proj.weight.data
-        torch.nn.init.xavier_uniform_(w.view([w.shape[0], -1]))
-
-        if self.use_audio:
-            w = self.patch_embed_a.proj.weight.data
-            torch.nn.init.xavier_uniform_(w.view([w.shape[0], -1]))
-
-        # timm's trunc_normal_(std=.02) is effectively normal_(std=0.02) as cutoff is too big (2.)
-        nn.init.normal_(self.cls_token, std=std)
-        nn.init.normal_(self.temporal_embed, std=std)
-        nn.init.normal_(self.type_embed_v, std=std)
-        if self.use_audio:
-            nn.init.normal_(self.freq_embed, std=std)
-            nn.init.normal_(self.type_embed_a, std=std)
-
-        # initialize nn.Linear and nn.LayerNorm
-        self.apply(self._init_weights)
-
-    def _init_weights(self, m):
-        if isinstance(m, nn.Linear):
-            nn.init.normal_(m.weight, std=0.02)
-            if isinstance(m, nn.Linear) and m.bias is not None:
-                nn.init.constant_(m.bias, 0)
-        elif isinstance(m, nn.LayerNorm):
-            nn.init.constant_(m.bias, 0)
-            nn.init.constant_(m.weight, 1.0)
 
     @torch.jit.ignore
     def no_weight_decay(self):
@@ -389,7 +356,9 @@ class TVLTTransformer(nn.Module):
         # Add classifier head to origin code
         output = self.classifier(x)
 
-        new_out_shape = output.shape[:-1] + self.output_dim
-        output = output.view(new_out_shape)
+        if self.args.dataset == 'emognition' or 'mdmer':
+            output_v = output[:, :self.output_dim[0]].unsqueeze(-1)
+            output_a = output[:, self.output_dim[0]:].unsqueeze(-1)
+            output = torch.concat((output_v, output_a), dim=-1)
 
         return output
