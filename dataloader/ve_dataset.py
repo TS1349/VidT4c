@@ -197,8 +197,11 @@ class VERandomDataset(Dataset):
         row = self.df.iloc[idx]
         video_path = row.facial_video
 
-        if any(f"EAV/subject{sid}" in video_path for sid in [4, 5, 18, 20, 38]):
-            return self.__getitem__((idx + 1) % len(self.df))      
+        # If you have error with new EAV dataset, you can use below code
+
+        # if any(f"EAV/subject{sid}" in video_path for sid in [4, 5, 18, 20, 38]):
+        #     print("error missing file existing")
+        #     return self.__getitem__((idx + 1) % len(self.df))   
 
         try:
             video_orig, _, metadata = read_video(
