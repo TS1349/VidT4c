@@ -4,10 +4,84 @@ from torchvision.io import read_video
 import pandas as pd
 import math
 from .utils import torch_random_int
+import numpy as np
+
+def _motion_scores_from_video(video_TCHW: torch.Tensor) -> np.ndarray:
+    """
+    video_TCHW: [T, C, H, W], float tensor assumed in [0,1] or [0,255]
+    return: np.ndarray of shape [T], per-frame motion score (non-negative)
+    """
+    v = video_TCHW.float()
+    diffs = (v[1:] - v[:-1]).abs().mean(dim=(1,2,3))  # [T-1]
+
+    scores = torch.cat([torch.zeros(1, device=v.device), diffs], dim=0)  # [T]
+    scores = scores.clamp_min(0).sqrt()
+    scores = scores.cpu().numpy()
+
+    if scores.sum() <= 1e-8:
+        scores = np.ones_like(scores, dtype=np.float32)
+    return scores
+
+def _cdf_from_scores(scores: np.ndarray) -> np.ndarray:
+    scores = scores.astype(np.float64)
+    scores /= scores.sum()
+    cdf = np.cumsum(scores)
+    cdf = np.clip(cdf, 0.0, 1.0)
+    return cdf
+
+def _pick_indices_by_cdf(cdf: np.ndarray, num_out_frames: int, deterministic: bool) -> np.ndarray:
+    """
+    cdf: shape [T], monotonically increasing in [0,1]
+    num_out_frames: e.g., 32
+    deterministic: True for val/test (구간 중앙), False for train (구간 내 랜덤)
+    return: np.ndarray of length num_out_frames (0-based frame indices, sorted)
+    """
+    T = len(cdf)
+    targets = []
+    for i in range(num_out_frames):
+        lo, hi = i / num_out_frames, (i + 1) / num_out_frames
+        if deterministic:
+            t = (lo + hi) * 0.5
+        else:
+            t = np.random.uniform(lo, hi)
+        targets.append(t)
+
+    # Nearest cdf position as frame idx
+    cdf_np = cdf
+    idxs = []
+    for t in targets:
+        j = int(np.abs(cdf_np - t).argmin())
+        idxs.append(j)
+
+    # Remove duplication
+    idxs = np.array(idxs, dtype=np.int64)
+    idxs = np.clip(idxs, 0, T-1)
+
+    used = set()
+    for k in range(len(idxs)):
+        if idxs[k] not in used:
+            used.add(int(idxs[k]))
+            continue
+        # If collapse, find side idxs
+        left = idxs[k] - 1
+        right = idxs[k] + 1
+        moved = False
+        while left >= 0 or right < T:
+            if left >= 0 and left not in used:
+                idxs[k] = left; used.add(int(left)); moved = True; break
+            if right < T and right not in used:
+                idxs[k] = right; used.add(int(right)); moved = True; break
+            left -= 1; right += 1
+        if not moved:
+            used.add(int(idxs[k]))
+    idxs.sort()
+    return idxs
+
 
 class VERandomDataset(Dataset):
     def __init__(
             self,
+            motion_sampler,
             csv_file,
             eeg_sampling_rate,
             eeg_channel_count,
@@ -20,7 +94,7 @@ class VERandomDataset(Dataset):
             num_out_frames = 32,
             num_out_eeg = 64,
             ):
-        
+        self.motion_sampler = motion_sampler
         self.csv_file = str(csv_file)
         self.split = split
         self.video_output_format = video_output_format
@@ -86,21 +160,21 @@ class VERandomDataset(Dataset):
         delta = end_idx - start_idx
         return [ round(start_idx + i * delta / (final_number -1)) for i in range(final_number) ]
     
+    def _get_sampler_frame_idxs(self, total_frames, fps, video_tensor=None):
+
+        assert video_tensor.shape[0] == total_frames
+
+        scores = _motion_scores_from_video(video_tensor)           # [T]
+        cdf = _cdf_from_scores(scores)                             # [T] in [0,1]
+
+        # Data split
+        deterministic = (self.split.lower() in ["test"])
+
+        # CDF based sector sampling
+        idxs = _pick_indices_by_cdf(cdf, self.num_out_frames, deterministic)  # [num_out_frames]
+        return idxs.tolist()
+    
     def _get_random_frame_idxs(self, total_frames, fps):
-        # num_frames_in_window = math.floor(fps * self.time_window)
-
-        # lower_bound = math.ceil((num_frames_in_window / (self.num_out_frames - 1)))
-        # upper_bound = total_frames - num_frames_in_window - lower_bound - 1 # since num_frames_in_window is floored
-
-        # random_start_idx = torch_random_int(
-        #     low = lower_bound,
-        #     high = upper_bound, # ! low + 32 x 6.4
-        #     )
-        
-        # idxs = VERandomDataset._decimate_idxs(
-        #     start_idx = random_start_idx,
-        #     end_idx = random_start_idx + num_frames_in_window,
-        #     final_number=self.num_out_frames)
 
         idxs = VERandomDataset._decimate_idxs(
             start_idx = 5,
@@ -110,17 +184,6 @@ class VERandomDataset(Dataset):
         return idxs
     
     def _get_corresponding_eeg_idxs(self, frame_idxs, fps):
-        # num_samples_sub_window = round(self.time_sub_window * self.eeg_sampling_rate)
-
-        # eeg_idxs = [ math.floor((idx  * self.eeg_sampling_rate / fps)) - num_samples_sub_window // 2
-        #             for idx in frame_idxs ]
-        # eeg_idxs.append(eeg_idxs[-1] + num_samples_sub_window)
-
-        # decimated_eeg_idxs_list = [ VERandomDataset._decimate_idxs(
-        #     start_idx = eeg_idxs[i],
-        #     end_idx = eeg_idxs[i+1],
-        #     final_number=self.num_out_eeg
-        #     ) for i in range(len(eeg_idxs)-1) ]
         
         start_eeg_idx = math.floor(frame_idxs[0] * self.eeg_sampling_rate / fps)
         end_eeg_idx = math.floor(frame_idxs[-1] * self.eeg_sampling_rate / fps)
@@ -138,7 +201,7 @@ class VERandomDataset(Dataset):
             return self.__getitem__((idx + 1) % len(self.df))      
 
         try:
-            video, _, metadata = read_video(
+            video_orig, _, metadata = read_video(
                 filename=video_path,
                 pts_unit="sec",
                 output_format=self.video_output_format,
@@ -152,14 +215,23 @@ class VERandomDataset(Dataset):
         eeg = self._get_full_eeg(row)
         eeg_time_to_frames = math.floor(math.floor((eeg.shape[0] / self.eeg_sampling_rate)) * fps) # Seconds x fps for EEG frame
 
-        total_frames = min(video.shape[0], eeg_time_to_frames) # Based on frame
+        total_frames = min(video_orig.shape[0], eeg_time_to_frames) # Based on frame
 
-        video_idxs = self._get_random_frame_idxs(total_frames, fps)
-        video = video[video_idxs, ...]
+        if self.motion_sampler:
+            video_orig = video_orig[:total_frames, ...]
+
+            video_idxs = self._get_sampler_frame_idxs(
+                total_frames=total_frames,
+                fps=fps,
+                video_tensor=video_orig,
+            )
+        else:
+            video_idxs = self._get_random_frame_idxs(total_frames, fps)
+
+        video = video_orig[video_idxs, ...]
 
 
         if self.video_transform is not None:
-            # video = self.video_transform(video)
             video = torch.stack([self.video_transform(frame) for frame in video])
         
         eeg_idxs = self._get_corresponding_eeg_idxs(video_idxs, fps)
@@ -183,6 +255,7 @@ class VERandomDataset(Dataset):
 class EAVDataset(VERandomDataset):
     def __init__(
             self,
+            motion_sampler,
             csv_file,
             time_window = 15.0,
             split="train",
@@ -194,6 +267,7 @@ class EAVDataset(VERandomDataset):
             ):
 
         super(EAVDataset,self).__init__(
+                motion_sampler=motion_sampler,
                 csv_file = csv_file,
                 eeg_sampling_rate = 500,
                 time_window = time_window,
@@ -210,6 +284,7 @@ class EAVDataset(VERandomDataset):
 class MDMERDataset(VERandomDataset):
     def __init__(
             self,
+            motion_sampler,
             csv_file,
             time_window = 15.0,
             split="train",
@@ -221,6 +296,7 @@ class MDMERDataset(VERandomDataset):
             ):
 
         super(MDMERDataset,self).__init__(
+                motion_sampler=motion_sampler,
                 csv_file = csv_file,
                 eeg_sampling_rate = 300,
                 time_window = time_window,
@@ -237,6 +313,7 @@ class MDMERDataset(VERandomDataset):
 class EmognitionDataset(VERandomDataset):
     def __init__(
             self,
+            motion_sampler,
             csv_file,
             time_window = 30.0,
             split="train",
@@ -248,6 +325,7 @@ class EmognitionDataset(VERandomDataset):
             ):
 
         super(EmognitionDataset,self).__init__(
+                motion_sampler=motion_sampler,
                 csv_file = csv_file,
                 eeg_sampling_rate = 256,
                 time_window = time_window,
