@@ -170,13 +170,19 @@ def run(rank, args):
     ])
 
     # Check the right fourier transformation
-    fft = None
     if fft_mode == "AbsFFT":
         fft = AbsFFT(dim=-2)
         freq_bin = 64
     elif fft_mode == "Spectrogram":
-        fft = STFTFixedSize()
-        freq_bin = 128 * 256
+        # Change spectrogram resolution to fit each model
+        if args.model == 'vivit' or 'swin' or 'tsf':
+            freq = 224
+            time = 224
+        else:
+            freq = 128
+            time = 256
+        fft = STFTFixedSize(target_freq=freq, target_time=time)
+        freq_bin = freq * time
 
     training_dataset = torch_dataset(
         csv_file=csv_file,
