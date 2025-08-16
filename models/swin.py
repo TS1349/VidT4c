@@ -29,31 +29,6 @@ def patch_embed_4c(
             norm_layer = norm_layer
     )
 
-# def get_base_4c(output_dim):
-#     return SwinTransformer3d(
-#         patch_size=[2, 4, 4],
-#         embed_dim=128,
-#         depths=[2, 2, 18, 2],
-#         num_heads=[4, 8, 16, 32],
-#         window_size=[8, 7, 7],
-#         stochastic_depth_prob=0.1,
-#         patch_embed= patch_embed_4c,
-#         num_classes= output_dim,
-#     )
-
-# def get_base_3c(output_dim):
-#     return SwinTransformer3d(
-#         patch_size=[2, 4, 4],
-#         embed_dim=128,
-#         depths=[2, 2, 18, 2],
-#         num_heads=[4, 8, 16, 32],
-#         window_size=[8, 7, 7],
-#         stochastic_depth_prob=0.1,
-#         patch_embed= patch_embed_3c,
-#         num_classes= output_dim,
-#     )
-
-
 class BridgedVideoSwin4C(nn.Module):
     def __init__(self, args,
                  output_dim,
@@ -96,10 +71,16 @@ class BridgedVideoSwin4C(nn.Module):
         else:
             weight = None
 
-        self.video_model = swin3d_b(weights=weight,
-                patch_embed=self.patch_emb,
-                num_classes=output_dim[0]*output_dim[1])
-    
+        # To use pretrained weight with no error, replace head after weight loading
+        model = swin3d_b(
+            weights=weight,
+            patch_embed=self.patch_emb,
+            num_classes=400,
+        )
+        in_features = model.head.in_features
+        model.head = nn.Linear(in_features, output_dim[0]*output_dim[1])
+        self.model = model
+
     def forward(self, x):
         # Choose video vs video+EEG (AbsFFT or STFT) by arg option
         if self.args.eeg_signal:
@@ -113,9 +94,9 @@ class BridgedVideoSwin4C(nn.Module):
             
             four_channel_video = torch.cat([x["video"], eeg], dim = -3)
             four_channel_video.transpose_(-3, -4)
-            output = self.video_model(four_channel_video)
+            output = self.model(four_channel_video)
         else:
-            output = self.video_model(x["video"].transpose_(-3, -4))
+            output = self.model(x["video"].transpose_(-3, -4))
 
         if self.args.dataset == 'emognition' or 'mdmer':
             output_v = output[:, :self.output_dim[0]].unsqueeze(-1)

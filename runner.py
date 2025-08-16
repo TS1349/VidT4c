@@ -170,24 +170,38 @@ def run(rank, args):
     ])
 
     # Check the right fourier transformation
-    fft = None
     if fft_mode == "AbsFFT":
         fft = AbsFFT(dim=-2)
         freq_bin = 64
     elif fft_mode == "Spectrogram":
-        fft = STFTFixedSize()
-        freq_bin = 128 * 256
+        if args.model == 'vivit' or 'swin' or 'tsf':
+            freq = 224
+            time = 224
+        else:
+            freq = 128
+            time = 256
+
+        if args.dataset == 'emognition':
+            hop_length = 512
+        else:
+            hop_length = 128
+
+        fft = STFTFixedSize(n_fft = hop_length, target_freq=freq, target_time=time)
+        freq_bin = freq * time
+
 
     training_dataset = torch_dataset(
+        motion_sampler= args.motion_sampler,
         csv_file=csv_file,
-        time_window = 15.0, #sec -> change to avoid duplication of eeg sampling
+        time_window = 10.0, #sec -> change to avoid duplication of eeg sampling
         video_transform=video_preprocessor_train,
         eeg_transform = fft,
         split = "train"
     )
     validation_dataset = torch_dataset(
+        motion_sampler= args.motion_sampler,
         csv_file=csv_file,
-        time_window = 15.0, #sec
+        time_window = 10.0, #sec
         video_transform=video_preprocessor_val,
         eeg_transform = fft,
         split = "test"
@@ -348,7 +362,7 @@ def run(rank, args):
                     frequency_bins = freq_bin,
         )
         
-        if args.pretrained:
+        if args.pretrained and args.model in ('tsf', 'vivit'):
             pretrained_path = os.path.join(os.getcwd(), 'pretrained', args.model + '.pth') # ViViT, TimeSFormer
             print(f'Loading pretrained weights from {pretrained_path}')
             checkpoint = torch.load(pretrained_path)
@@ -429,8 +443,8 @@ if "__main__" == __name__:
     parser.add_argument("--num_gpus", type=int, default=1) # Check multi-gpu
     parser.add_argument("--batch_size", type=int, default=4)
 
-    parser.add_argument("--lrscheduler_start", type=float, default=5) # same with warmup epoch
-    parser.add_argument("--lrscheduler_step", type=float, default=10)
+    parser.add_argument("--lrscheduler_start", type=float, default=6)
+    parser.add_argument("--lrscheduler_step", type=float, default=5)
     parser.add_argument("--lrscheduler_decay", type=float, default=0.75) 
 
     parser.add_argument("--learning_rate", type=float, default=1e-5) # 1e-5: transformer, 1e-3: mamba only
@@ -457,7 +471,8 @@ if "__main__" == __name__:
                         choices=('AbsFFT', 'Spectrogram'), help='Choose FFT transformation method')
     parser.add_argument('--gcn', action='store_true', default=True,
                     help='Using gcn as classifier')
-    
+    parser.add_argument('--motion_sampler', action='store_true', default=False,
+            help='Adopting MGSampler method on dataloader')
     parser.add_argument('--server', type=str, default='j_zay', choices=('j_zay', 'nef'), help='Choose which server for appropriate settings')
 
     args = parser.parse_args()
