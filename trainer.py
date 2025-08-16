@@ -76,7 +76,10 @@ class PTrainer:
         self.training_dataloader.sampler.set_epoch(epoch)
 
         total_loss = 0
-        pbar = tqdm(total=len(self.training_dataloader), desc=f"Train Epoch {epoch}")
+        if (tqdm is not None) and self.use_tqdm:
+                pbar = tqdm.tqdm(total=len(self.training_dataloader), desc=f"Train Epoch {epoch}")
+        else:
+            pbar = None
 
         for batch_number, sample in enumerate(self.training_dataloader):
             # Move sample to device

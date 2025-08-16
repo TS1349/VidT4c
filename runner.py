@@ -7,7 +7,7 @@ from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 # from torchaudio.transforms import Spectrogram
 
-from torchvision.transforms.v2 import Compose, Normalize, Resize, ToDtype, RandomHorizontalFlip, ColorJitter
+from torchvision.transforms.v2 import Compose, Normalize, Resize, ToDtype, RandomHorizontalFlip, ColorJitter, ToImage, ToDtype
 import math
 import torch.nn as nn
 import torch.nn.functional as F
@@ -16,7 +16,7 @@ import numpy as np
 
 from world_info import init_distributed_mode
 from trainer import PTrainer
-from models import BridgedTimeSFormer4C, BridgedViViT4C, BridgedVideoSwin4C, AudioVisionTransformer, TVLTTransformer, VEMT
+from models import BridgedTimeSFormer4C, BridgedViViT4C, BridgedVideoSwin4C, AudioVisionTransformer, TVLTTransformer #, VEMT
 from dataloader import EAVDataset, EmognitionDataset, MDMERDataset
 from dataloader.transforms import AbsFFT, STFT, STFTFixedSize
 from scheduler import CosineScheduler
@@ -36,8 +36,8 @@ def get_torch_model(name):
         return AudioVisionTransformer
     elif name == "tvlt":
         return TVLTTransformer
-    elif name == "vemt":
-        return VEMT
+    # elif name == "vemt":
+    #     return VEMT
     else:
         raise Exception("Wrong model name")
 
@@ -152,20 +152,25 @@ def run(rank, args):
         torch.cuda.set_device(local_rank)
     else:
         print("No GPU available")
+
+    # mutliprocessor gives serialization error even with Lambda wrapper from transforms
+    # limit_range = Lambda(lambda x: x.float().div(255.0))
  
     # Data processing
     video_preprocessor_train = Compose([
+        ToImage(),
+        ToDtype(torch.float32, scale=True),
         Resize(size=(img_size, img_size), antialias=True),
         RandomHorizontalFlip(p=0.5),
         ColorJitter(brightness=0.2, contrast=0.2),
-        lambda x: x.float().div(255.0),
         Normalize(mean=(0.45, 0.45, 0.45), std=(0.225, 0.225, 0.225)),
     ])
 
     # During infernece, we don't need other transformations.
     video_preprocessor_val = Compose([
+        ToImage(),
+        ToDtype(torch.float32, scale=True),
         Resize(size=(img_size, img_size), antialias=True),
-        lambda x: x.float().div(255.0),
         Normalize(mean=(0.45, 0.45, 0.45), std=(0.225, 0.225, 0.225)),
     ])
 
@@ -193,7 +198,6 @@ def run(rank, args):
     training_dataset = torch_dataset(
         motion_sampler= args.motion_sampler,
         csv_file=csv_file,
-        time_window = 10.0, #sec -> change to avoid duplication of eeg sampling
         video_transform=video_preprocessor_train,
         eeg_transform = fft,
         split = "train"
@@ -201,7 +205,6 @@ def run(rank, args):
     validation_dataset = torch_dataset(
         motion_sampler= args.motion_sampler,
         csv_file=csv_file,
-        time_window = 10.0, #sec
         video_transform=video_preprocessor_val,
         eeg_transform = fft,
         split = "test"
@@ -367,6 +370,8 @@ def run(rank, args):
             print(f'Loading pretrained weights from {pretrained_path}')
             checkpoint = torch.load(pretrained_path)
             model.model.load_state_dict(checkpoint, strict=False) # Backbone is defined as the model.model
+    print(f"DEBUG{model}")
+    assert False
 
     device = torch.device(f"cuda:{rank}")
     model.to(device)
@@ -437,7 +442,7 @@ def run(rank, args):
 
 if "__main__" == __name__:
 
-    parser = argparse.ArgumentParser(description="TimeSFormer")
+    parser = argparse.ArgumentParser(description="VidT4c")
 
     parser.add_argument("--epochs", type=int, default=50) # Check the code's feasibility
     parser.add_argument("--num_gpus", type=int, default=1) # Check multi-gpu
@@ -461,7 +466,7 @@ if "__main__" == __name__:
     parser.add_argument("--seed", type=int, default=7254)
     parser.add_argument("--img_size", type=int, default="224")
 
-    parser.add_argument('--eeg_signal', action='store_true', default=True,
+    parser.add_argument('--eeg_signal', action='store_true', default=False,
                         help='Choose video+EEG input or model')
     parser.add_argument('--set_eeg_only', action='store_true', default=False,
                         help='Using only eeg in VEMT')

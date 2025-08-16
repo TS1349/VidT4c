@@ -1,5 +1,6 @@
 datasets
 checkpoints/
+pretrained/
 *.out
 *.err
 old_slurm/

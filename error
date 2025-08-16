@@ -1,0 +1,46 @@
+W0816 21:38:32.021000 2051053 site-packages/torch/multiprocessing/spawn.py:160] Terminating process 2051135 via signal SIGTERM
+Traceback (most recent call last):
+  File "/home/ts1349/projects/VidT4c/./runner.py", line 492, in <module>
+    while not spawn_context.join():
+              ^^^^^^^^^^^^^^^^^^^^
+  File "/home/ts1349/anaconda3/envs/VidT4c/lib/python3.12/site-packages/torch/multiprocessing/spawn.py", line 203, in join
+    raise ProcessRaisedException(msg, error_index, failed_process.pid)
+torch.multiprocessing.spawn.ProcessRaisedException:
+
+-- Process 0 terminated with the following error:
+Traceback (most recent call last):
+  File "/home/ts1349/anaconda3/envs/VidT4c/lib/python3.12/site-packages/torch/multiprocessing/spawn.py", line 90, in _wrap
+    fn(i, *args)
+  File "/home/ts1349/projects/VidT4c/runner.py", line 430, in run
+    p_trainer.train(epochs, save_every = 10)
+  File "/home/ts1349/projects/VidT4c/trainer.py", line 221, in train
+    self._run_epoch_single(epoch)
+  File "/home/ts1349/projects/VidT4c/trainer.py", line 84, in _run_epoch_single
+    for batch_number, sample in enumerate(self.training_dataloader):
+                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ts1349/anaconda3/envs/VidT4c/lib/python3.12/site-packages/torch/utils/data/dataloader.py", line 484, in __iter__
+    return self._get_iterator()
+           ^^^^^^^^^^^^^^^^^^^^
+  File "/home/ts1349/anaconda3/envs/VidT4c/lib/python3.12/site-packages/torch/utils/data/dataloader.py", line 415, in _get_iterator
+    return _MultiProcessingDataLoaderIter(self)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ts1349/anaconda3/envs/VidT4c/lib/python3.12/site-packages/torch/utils/data/dataloader.py", line 1138, in __init__
+    w.start()
+  File "/home/ts1349/anaconda3/envs/VidT4c/lib/python3.12/multiprocessing/process.py", line 121, in start
+    self._popen = self._Popen(self)
+                  ^^^^^^^^^^^^^^^^^
+  File "/home/ts1349/anaconda3/envs/VidT4c/lib/python3.12/multiprocessing/context.py", line 224, in _Popen
+    return _default_context.get_context().Process._Popen(process_obj)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ts1349/anaconda3/envs/VidT4c/lib/python3.12/multiprocessing/context.py", line 289, in _Popen
+    return Popen(process_obj)
+           ^^^^^^^^^^^^^^^^^^
+  File "/home/ts1349/anaconda3/envs/VidT4c/lib/python3.12/multiprocessing/popen_spawn_posix.py", line 32, in __init__
+    super().__init__(process_obj)
+  File "/home/ts1349/anaconda3/envs/VidT4c/lib/python3.12/multiprocessing/popen_fork.py", line 19, in __init__
+    self._launch(process_obj)
+  File "/home/ts1349/anaconda3/envs/VidT4c/lib/python3.12/multiprocessing/popen_spawn_posix.py", line 47, in _launch
+    reduction.dump(process_obj, fp)
+  File "/home/ts1349/anaconda3/envs/VidT4c/lib/python3.12/multiprocessing/reduction.py", line 60, in dump
+    ForkingPickler(file, protocol).dump(obj)
+AttributeError: Can't get local object 'run.<locals>.<lambda>'
