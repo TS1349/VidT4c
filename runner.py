@@ -371,7 +371,6 @@ def run(rank, args):
             checkpoint = torch.load(pretrained_path)
             model.model.load_state_dict(checkpoint, strict=False) # Backbone is defined as the model.model
     print(f"DEBUG{model}")
-    assert False
 
     device = torch.device(f"cuda:{rank}")
     model.to(device)
@@ -457,7 +456,7 @@ if "__main__" == __name__:
     parser.add_argument("--csv_file", type=str, default= "./datasets/updated_fold_csv_files/MDMER_fold_csv/MDMER_dataset_updated_fold0.csv")
     parser.add_argument("--checkpoint_dir", type=str, default="./checkpoints")
     parser.add_argument("--pretrained_dir", type=str, default="./pretrained")
-    parser.add_argument('--pretrained', action='store_true', default=True,
+    parser.add_argument('--pretrained', action='store_true', default=False,
                         help='Choose pretrained backbone or scratch for swin and hicmae')
     parser.add_argument("--experiment_name", type=str, default="mdmer-vemt-va5_gcn-two_mile5-0.75_1e-5-5e-5-m0.1_b4_e50_res224")
     parser.add_argument("--dataset", type=str, default="mdmer", choices=('eav', 'mdmer', 'emognition'))

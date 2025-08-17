@@ -65,6 +65,8 @@ def fill_in(args):
     num_gpus = args.num_gpus
     batch_size = args.batch_size
     learning_rate = args.learning_rate
+    pretrained = args.pretrained
+    p_string = "_pretrained" if pretrained else ""
     return f'\
 #!/bin/bash\n\n\
 #SBATCH --job-name=\
@@ -92,16 +94,16 @@ export OMP_NUM_THREADS=1\n\n\
 fold_csv="{csv_location(dataset, fold)}"\n\n\n\n\
 set -x\n\
 srun python -u ./runner.py \\\n\
-        --epochs 200\\\n\
+        --epochs 100\\\n\
         --batch_size {batch_size}\\\n\
         --learning_rate {learning_rate}\\\n\
-        --weight_decay 0.001\\\n\
+        --weight_decay 0.00005\\\n\
         --csv_file "$fold_csv"\\\n\
         --checkpoint_dir "./checkpoints"\\\n\
-        --experiment_name "{model}_{dataset}_{learning_rate[2:]}"\\\n\
+        --experiment_name "{model}_{dataset}_{learning_rate[2:]}{p_string}"\\\n\
         --dataset "{dataset}"\\\n\
         --model "{model}"\\\n\
-        --pretrained \n\
+        {"--pretrained" if pretrained else ""} \n\
 '
 
 if "__main__" == __name__:
@@ -142,6 +144,9 @@ if "__main__" == __name__:
     parser.add_argument("--learning_rate",
                         type=str,
                         default="0.01")
+    parser.add_argument("--pretrained",
+                        action="store_true",
+                        default=False)
 
     args = parser.parse_args()
 
