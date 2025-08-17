@@ -365,8 +365,8 @@ def run(rank, args):
                     frequency_bins = freq_bin,
         )
         
-        if args.pretrained and args.model in ('tsf', 'vivit'):
-            pretrained_path = os.path.join(os.getcwd(), 'pretrained', args.model + '.pth') # ViViT, TimeSFormer
+        if args.pretrained and args.model == 'vivit': # ViViT, Swin utilize inner weight
+            pretrained_path = os.path.join(os.getcwd(), 'pretrained', args.model + '.pth') # TimeSFormer
             print(f'Loading pretrained weights from {pretrained_path}')
             checkpoint = torch.load(pretrained_path)
             model.model.load_state_dict(checkpoint, strict=False) # Backbone is defined as the model.model

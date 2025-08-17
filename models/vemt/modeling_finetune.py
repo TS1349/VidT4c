@@ -454,7 +454,7 @@ class VisionTransformer(nn.Module):
         if self.args.set_video_only:
             x = self.head_dropout(x)
             x = self.head(x)
-            if self.args.dataset == 'emognition' or 'mdmer':
+            if self.args.dataset in ('emognition', 'mdmer'):
                 x_v = x[:, :self.num_value].unsqueeze(-1)
                 x_a = x[:, self.num_value:].unsqueeze(-1)
                 x = torch.concat((x_v, x_a), dim=-1)

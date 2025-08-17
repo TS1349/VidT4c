@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from .vit import ViViT
-import os
+from transformers import VivitConfig, VivitForVideoClassification
 
 class Mlp(nn.Module):
     def __init__(self,
@@ -60,23 +60,29 @@ class BridgedViViT4C(nn.Module):
         else:
             self.input_ch = 3
 
-        # ViViT (https://github.com/rishikksh20/ViViT-pytorch)
-        self.model = ViViT(
+        # Using hugging face ViViT model (inclusing pretrained weight)
+        vivit_config = VivitConfig(
             image_size=image_size,
-            patch_size=16,
-            num_classes=self.num_classes,
             num_frames=32,
-            dim=768,
-            depth=12,
-            heads=12,
-            pool='cls',
-            in_channels=self.input_ch,
-            dim_head=64,
-            dropout=0.,
-            emb_dropout=0.1,
-            scale_dim=4,
-            tubelet_size=2,
+            tubelet_size=[2, 16, 16],
+            video_size = [32, 224, 224],
+            num_channels=self.input_ch,
+            hidden_size=768,
+            num_hidden_layers=12,
+            num_attention_heads=12,
+            num_labels=self.num_classes,
         )
+
+        if self.args.pretrained:
+            self.model = VivitForVideoClassification.from_pretrained(
+                "google/vivit-b-16x2-kinetics400",
+                config=vivit_config,
+                ignore_mismatched_sizes=True,
+                force_download=True,
+                use_safetensors=True)
+        else:
+            self.model = VivitForVideoClassification(
+            config=vivit_config,)
             
 
     def forward(self, sample):
@@ -91,15 +97,14 @@ class BridgedViViT4C(nn.Module):
                 eeg = self.eeg2fps(sample["eeg"]).unsqueeze(2)
             
             four_channel_video = torch.cat([sample["video"], eeg], dim = -3)
-            four_channel_video.transpose_(-3, -4)
             output = self.model(four_channel_video)
         else:
-            output = self.model(sample["video"].transpose_(-3, -4))
+            output = self.model(sample["video"])
 
-        if self.args.dataset == 'emognition' or 'mdmer':
-            output_v = output[:, :self.output_dim[0]].unsqueeze(-1)
-            output_a = output[:, self.output_dim[0]:].unsqueeze(-1)
-            output = torch.concat((output_v, output_a), dim=-1)
-
+        logits = output.logits
+        if self.args.dataset in ('emognition', 'mdmer'):
+            logits_v = logits[:, :self.output_dim[0]].unsqueeze(-1)
+            logits_a = logits[:, self.output_dim[0]:].unsqueeze(-1)
+            logits = torch.concat((logits_v, logits_a), dim=-1)
         
-        return output
+        return logits

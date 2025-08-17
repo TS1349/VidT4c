@@ -356,7 +356,7 @@ class TVLTTransformer(nn.Module):
         # Add classifier head to origin code
         output = self.classifier(x)
 
-        if self.args.dataset == 'emognition' or 'mdmer':
+        if self.args.dataset in ('emognition', 'mdmer'):
             output_v = output[:, :self.output_dim[0]].unsqueeze(-1)
             output_a = output[:, self.output_dim[0]:].unsqueeze(-1)
             output = torch.concat((output_v, output_a), dim=-1)

@@ -29,6 +29,7 @@ def patch_embed_4c(
             norm_layer = norm_layer
     )
 
+
 class BridgedVideoSwin4C(nn.Module):
     def __init__(self, args,
                  output_dim,
@@ -98,7 +99,7 @@ class BridgedVideoSwin4C(nn.Module):
         else:
             output = self.model(x["video"].transpose_(-3, -4))
 
-        if self.args.dataset == 'emognition' or 'mdmer':
+        if self.args.dataset in ('emognition', 'mdmer'):
             output_v = output[:, :self.output_dim[0]].unsqueeze(-1)
             output_a = output[:, self.output_dim[0]:].unsqueeze(-1)
             output = torch.concat((output_v, output_a), dim=-1)

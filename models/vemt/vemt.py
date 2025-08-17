@@ -303,7 +303,7 @@ class VEMT(nn.Module):
                 fused_f = torch.cat((eeg_f, video_f), dim=1)
                 output = self.classifier(fused_f)
                 
-            if self.args.dataset == 'emognition' or 'mdmer':
+            if self.args.dataset in ('emognition', 'mdmer'):
                 output_v = output[:, :self.output_dim[0]].unsqueeze(-1)
                 output_a = output[:, self.output_dim[0]:].unsqueeze(-1)
                 output = torch.concat((output_v, output_a), dim=-1)
