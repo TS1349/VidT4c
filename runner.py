@@ -219,7 +219,7 @@ def run(rank, args):
     # Add validation sampler
     validation_sampler = DistributedSampler(
         dataset=validation_dataset,
-        num_replicas=args.num_gpus,
+        num_replicas=num_replicas,
         rank=rank,
     )
 
