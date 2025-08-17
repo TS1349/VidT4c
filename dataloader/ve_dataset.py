@@ -291,6 +291,8 @@ class EAVDataset(VERandomDataset):
                 output_shape = (5,1),
                 eeg_channel_count = 30,
         )
+    def _get_label(self, row):
+        return torch.tensor(row.label_id, dtype = torch.int64)
 
 class MDMERDataset(VERandomDataset):
     def __init__(
