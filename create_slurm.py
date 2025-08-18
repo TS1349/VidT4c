@@ -100,7 +100,7 @@ srun python -u ./runner.py \\\n\
         --weight_decay 0.00005\\\n\
         --csv_file "$fold_csv"\\\n\
         --checkpoint_dir "./checkpoints"\\\n\
-        --experiment_name "{model}_{dataset}_{learning_rate[2:]}{p_string}"\\\n\
+        --experiment_name "{model}_{dataset}_lr{learning_rate[2:]}_bs{batch_size}_{p_string}"\\\n\
         --dataset "{dataset}"\\\n\
         --model "{model}"\\\n\
         {"--pretrained" if pretrained else ""} \n\
@@ -151,7 +151,8 @@ if "__main__" == __name__:
     args = parser.parse_args()
 
     slurm_script = fill_in(args)
+    p_string = "_pretrained" if args.pretrained else ""
 
-    file_name = f"./{'debug_' if args.debug else ''}{args.model}_{args.dataset}_{args.learning_rate[2:]}.slurm"
+    file_name = f"./{'debug_' if args.debug else ''}{args.model}_{args.dataset}_lr{args.learning_rate[2:]}_bs{args.batch_size}{p_string}.slurm"
     with open(file_name, "w") as file:
         file.write(slurm_script)
