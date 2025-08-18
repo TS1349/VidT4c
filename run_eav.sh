@@ -1,6 +1,6 @@
 #!/bin/bash
 
-fold_csv="./datasets/updated_fold_csv_files/Emognition_fold_csv/Emognition_dataset_updated_fold0.csv"
+fold_csv="./datasets/updated_fold_csv_files/EAV_fold_csv/EAV_dataset_updated_fold0.csv"
 
 python -u ./runner.py \
         --epochs 50\
@@ -10,8 +10,8 @@ python -u ./runner.py \
         --weight_decay 0.0004\
         --csv_file "$fold_csv"\
         --checkpoint_dir "./checkpoints"\
-        --experiment_name "emognition_swin_0"\
-        --dataset "emognition"\
+        --experiment_name "vivit_eav"\
+        --dataset "eav"\
         --model "vivit"\
         --server "nef"\
         --port 12355

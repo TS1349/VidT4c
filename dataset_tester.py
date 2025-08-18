@@ -22,10 +22,10 @@ mdmer = MDMERDataset(
 def run_through(dataset):
     for i in range(len(dataset)):
         item = dataset[i]
-        print(f"{i} :{item["video"].shape} : {item["eeg"].shape}")
+        print(f"{i} :{item["video"].shape} : {item["eeg"].shape} : {item["output"]}")
 
 
-run_through(mdmer)
-run_through(emognition)
+#run_through(mdmer)
+#run_through(emognition)
 run_through(eav)
 

@@ -90,10 +90,15 @@ class PTrainer:
             output = self.model(sample)
             target = sample["output"]
             
-            # # loss = self.loss_function(output.float(), target)
-            v_loss = self.loss_function(output[:, :, 0].float(), target[:, 0])
-            a_loss = self.loss_function(output[:, :, 1].float(), target[:, 1])
-            loss = 0.5 * (v_loss + a_loss)
+            loss = self.loss_function(output.float(), target)
+
+            # There's no point in splitting those up CrossEntropyLoss does it automatically 
+            # See: https://docs.pytorch.org/docs/stable/generated/torch.nn.CrossEntropyLoss.html
+            # Also cause EAV doesn't have V and A
+
+            # v_loss = self.loss_function(output[:, :, 0].float(), target[:, 0])
+            # a_loss = self.loss_function(output[:, :, 1].float(), target[:, 1])
+            # loss = 0.5 * (v_loss + a_loss)
 
             # Check actual prediction class for each sample
             # print("Pred:", output.argmax(1), "Target:",target)
@@ -153,9 +158,15 @@ class PTrainer:
                 target = sample["output"]
                 predictions = self.model(sample)
                 
-                v_loss = self.loss_function(predictions[:, :, 0].float(), target[:, 0])
-                a_loss = self.loss_function(predictions[:, :, 1].float(), target[:, 1])
-                batch_loss_value = 0.5 * (v_loss + a_loss)
+                # There's no point in splitting those up CrossEntropyLoss does it automatically 
+                # See: https://docs.pytorch.org/docs/stable/generated/torch.nn.CrossEntropyLoss.html
+                # Also cause EAV doesn't have V and A
+
+                # v_loss = self.loss_function(predictions[:, :, 0].float(), target[:, 0])
+                # a_loss = self.loss_function(predictions[:, :, 1].float(), target[:, 1])
+                # batch_loss_value = 0.5 * (v_loss + a_loss)
+
+                batch_loss_value = self.loss_function(predictions.float(), target)
 
                 total_loss += batch_loss_value * batch_size_now
                 global_loss = total_loss / total_samples

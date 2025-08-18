@@ -96,7 +96,7 @@ class BridgedViViT4C(nn.Module):
         else:
             output = self.model(sample["video"].transpose_(-3, -4))
 
-        if self.args.dataset == 'emognition' or 'mdmer':
+        if self.args.dataset == 'emognition' or self.args.dataset == 'mdmer':
             output_v = output[:, :self.output_dim[0]].unsqueeze(-1)
             output_a = output[:, self.output_dim[0]:].unsqueeze(-1)
             output = torch.concat((output_v, output_a), dim=-1)
