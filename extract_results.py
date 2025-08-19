@@ -18,7 +18,7 @@ def main(args):
             best_avg = max(line_idxs, key=lambda idx : get_average(lines[idx]))
             print(f"V: E={best_v} : {get_penultimate(lines[best_v])}")
             print(f"A: E={best_a} : {get_ultimate(lines[best_a])}")
-            print(f"AVG: E={best_avg} : {get_average(lines[best_avg])}")
+            print(f"AVG: E={best_avg} : AVG={get_penultimate(lines[best_avg])} : V={get_ultimate(lines[best_avg])} : A={get_average(lines[best_avg])}")
             
             
 
