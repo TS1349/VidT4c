@@ -108,6 +108,7 @@ python runner.py --vemt_video AdaMAE --fusion naive --eeg_signal --gcn \
 
 - VEMT 내의 ViViT, AdaMAE, Cbramod code 중심으로 체크 (본래 benchmark code인 각 model.py 들은 아직 변경전)
 - 예전에 쓰던 slurm인 old_slurm은 현재 구현으로 돌아가지 않습니다. (srun으로 위 code run)
+- Backbone ckpt download (https://drive.google.com/drive/folders/1f44ETZWN6MN_ARuE2TeGbaf8fcMTScLf?usp=sharing) -> ./pretrained
 
 ## New method
 
