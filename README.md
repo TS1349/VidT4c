@@ -34,7 +34,7 @@ Train만 K=1 random clip, val/test는 K-clip 그대로. Video에는 augmentation
 → benchmark setup에선 안 씀. Video ablation 따로 볼 때만 옵션.
 
 ### `--eeg_full_signal`
-EEG를 비디오 전체 span의 1개 윈도우로. Standalone EEG-only에선 짧은 random window의 label noise를 피하니까 잘 나옴 (ACC 0.335 vs per-clip 0.253).
+EEG를 비디오 전체 span의 1개 윈도우로. Standalone EEG-only에선 짧은 random window의 label noise를 피하니까 잘 나옴 (ACC 0.335 vs per-clip 0.283).
 
 근데:
 - 120s → 2000 samples 다운샘플은 CBraMod 사전학습 분포(10s @ native fs)에서 OOD
@@ -85,6 +85,8 @@ python runner.py --vemt_video AdaMAE --fusion naive --set_video_only \
   --num_clips 6 --frame_interval 16 --clip_pool attn --fps_normalize \
   --video_unfreeze_last_n_blocks 1
 ```
+(ACC: 0.274, UAR: 0.226, F1-w 0.171)
+(--clip_pool max -> ACC: 0.269, UAR: 0.226, F1-w: 0.177)
 
 ### EEG baseline (set_eeg_only, CBraMod 전체 fine-tune)
 ```bash
@@ -95,6 +97,7 @@ python runner.py --fusion naive --set_eeg_only \
   --num_clips 6 --frame_interval 10 --clip_pool mean --fps_normalize \
   --eeg_full_unfreeze
 ```
+(ACC: 0.283, UAR: 0.235, F1-w: 0.177)
 
 ### GCN Fusion (main setup ★)
 ```bash
@@ -106,8 +109,11 @@ python runner.py --vemt_video AdaMAE --fusion naive --eeg_signal --gcn \
   --video_unfreeze_last_n_blocks 1 --eeg_full_unfreeze
 ```
 
+(Run_0 -> ACC: 0.313, UAR: 0.233, F1-w: 0.242, Running (Run_1,2,3,4))
+
 - VEMT 내의 ViViT, AdaMAE, Cbramod code 중심으로 체크 (본래 benchmark code인 각 model.py 들은 아직 변경전)
 - 예전에 쓰던 slurm인 old_slurm은 현재 구현으로 돌아가지 않습니다. (srun으로 위 code run)
+- 현재 main.py는 총 5번의 run 이후 mean, std이 자동 계산 됩니다.
 - Backbone ckpt download (https://drive.google.com/drive/folders/1f44ETZWN6MN_ARuE2TeGbaf8fcMTScLf?usp=sharing) -> ./pretrained
 
 ## New method
