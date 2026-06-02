@@ -1,0 +1,39 @@
+# --- large data / training artifacts -----------------------------
+checkpoints/
+checkpoints_5/
+checkpoints_clip/
+.feature_cache/
+datasets/
+pretrained/
+emognition_plots/
+mdmer_plots/
+
+# --- python -------------------------------------------------------
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.ipynb_checkpoints/
+
+# --- editor / shell -----------------------------------------------
+*.swp
+*.swo
+*.swm
+*.swn
+.DS_Store
+
+# --- runtime logs / scratch ---------------------------------------
+*.log
+nohup.out
+.chain_logs/
+/tmp/
+
+# --- claude code session state ------------------------------------
+.claude/
+
+# --- env / secrets ------------------------------------------------
+.env
+.env.*
+*.key
+*.token
