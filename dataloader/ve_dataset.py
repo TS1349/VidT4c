@@ -4,7 +4,6 @@ from torch.utils.data.dataloader import default_collate
 from torchvision.io import read_video
 import pandas as pd
 import math
-from .utils import torch_random_int
 import numpy as np
 from collections import Counter
 import ast
@@ -48,82 +47,10 @@ def dense_video_collate_fn(batch):
     out.update(rest_collated)
     return out
 
-def _motion_scores_from_video(video_TCHW: torch.Tensor) -> np.ndarray:
-    """
-    video_TCHW: [T, C, H, W], float tensor assumed in [0,1] or [0,255]
-    return: np.ndarray of shape [T], per-frame motion score (non-negative)
-    """
-    v = video_TCHW.float()
-    diffs = (v[1:] - v[:-1]).abs().mean(dim=(1,2,3))  # [T-1]
-
-    scores = torch.cat([torch.zeros(1, device=v.device), diffs], dim=0)  # [T]
-    scores = scores.clamp_min(0).sqrt()
-    scores = scores.cpu().numpy()
-
-    if scores.sum() <= 1e-8:
-        scores = np.ones_like(scores, dtype=np.float32)
-    return scores
-
-def _cdf_from_scores(scores: np.ndarray) -> np.ndarray:
-    scores = scores.astype(np.float64)
-    scores /= scores.sum()
-    cdf = np.cumsum(scores)
-    cdf = np.clip(cdf, 0.0, 1.0)
-    return cdf
-
-def _pick_indices_by_cdf(cdf: np.ndarray, num_out_frames: int, deterministic: bool) -> np.ndarray:
-    """
-    cdf: shape [T], monotonically increasing in [0,1]
-    num_out_frames: e.g., 32
-    deterministic: True for val/test, False for train
-    return: np.ndarray of length num_out_frames (0-based frame indices, sorted)
-    """
-    T = len(cdf)
-    targets = []
-    for i in range(num_out_frames):
-        lo, hi = i / num_out_frames, (i + 1) / num_out_frames
-        if deterministic:
-            t = (lo + hi) * 0.5
-        else:
-            t = np.random.uniform(lo, hi)
-        targets.append(t)
-
-    # Nearest cdf position as frame idx
-    cdf_np = cdf
-    idxs = []
-    for t in targets:
-        j = int(np.abs(cdf_np - t).argmin())
-        idxs.append(j)
-
-    # Remove duplication
-    idxs = np.array(idxs, dtype=np.int64)
-    idxs = np.clip(idxs, 0, T-1)
-
-    used = set()
-    for k in range(len(idxs)):
-        if idxs[k] not in used:
-            used.add(int(idxs[k]))
-            continue
-        # If collapse, find side idxs
-        left = idxs[k] - 1
-        right = idxs[k] + 1
-        moved = False
-        while left >= 0 or right < T:
-            if left >= 0 and left not in used:
-                idxs[k] = left; used.add(int(left)); moved = True; break
-            if right < T and right not in used:
-                idxs[k] = right; used.add(int(right)); moved = True; break
-            left -= 1; right += 1
-        if not moved:
-            used.add(int(idxs[k]))
-    idxs.sort()
-    return idxs
-
 
 class VERandomDataset(Dataset):
     def __init__(
         self,
-        motion_sampler,
         csv_file,
         eeg_sampling_rate,
         eeg_channel_count,
@@ -142,16 +69,13 @@ class VERandomDataset(Dataset):
         num_clips=1,            # K-clip multi-clip inference (1 = original behaviour)
         frame_interval=2,       # backbone-native stride for K-clip mode (frames per output step)
         eeg_full_signal=False,  # if True with num_clips>1: video=K clips, EEG=single full-view window
-        train_random_crop=False, # train: one random clip at native stride; val/test: K-clip
-        fps_normalize=False,    # if True: scale frame_interval by fps/30 so 30/60fps videos cover the same wall-clock per clip
-        dense_video_clips=False, # if True: emit N (variable) non-overlapping clips at native fi covering whole video; EEG uses full-signal view
-        clip_overlap_ratio=0.0,  # under dense mode: 0.0 = no overlap; 0.5 = 50% overlap (consecutive clips share half their span); doubles N at 0.5
+        fps_normalize=False,    # scale frame_interval by fps/30 for mixed-fps videos
+        dense_video_clips=False, # emit N variable non-overlapping clips covering whole video
+        clip_overlap_ratio=0.0,  # dense mode: 0.5 = 50% overlap (doubles N)
     ):
-        self.motion_sampler = motion_sampler
         self.num_clips = max(1, int(num_clips))
         self.frame_interval = max(1, int(frame_interval))
         self.eeg_full_signal = bool(eeg_full_signal)
-        self.train_random_crop = bool(train_random_crop)
         self.fps_normalize = bool(fps_normalize)
         self.dense_video_clips = bool(dense_video_clips)
         self.clip_overlap_ratio = float(clip_overlap_ratio)
@@ -245,14 +169,6 @@ class VERandomDataset(Dataset):
         delta = end_idx - start_idx
         return [round(start_idx + i * delta / (final_number - 1)) for i in range(final_number)]
 
-    def _get_sampler_frame_idxs(self, total_frames, fps, video_tensor=None):
-        assert video_tensor is not None and video_tensor.shape[0] == total_frames
-        scores = _motion_scores_from_video(video_tensor)  # [T]
-        cdf = _cdf_from_scores(scores)                   # [T] in [0,1]
-        deterministic = (self.split.lower() in ["test", "val", "validation"])
-        idxs = _pick_indices_by_cdf(cdf, self.num_out_frames, deterministic)
-        return idxs.tolist()
-
     def _get_random_frame_idxs(self, total_frames, fps):
         start = max(0, 1)
         end = max(start + 1, total_frames - 1)
@@ -291,8 +207,9 @@ class VERandomDataset(Dataset):
             step = (max_c - min_c) / (K - 1)
             centers = [int(round(min_c + i * step)) for i in range(K)]
 
-        # Random jitter for training (deterministic at val/test)
-        deterministic = (self.split.lower() in ("test", "val", "validation"))
+        # Random jitter for training (deterministic at val/test, or when forced for dumps)
+        deterministic = (self.split.lower() in ("test", "val", "validation")
+                         or getattr(self, "force_deterministic", False))
         if not deterministic and K >= 1:
             seg_half = max(1, int((max_c - min_c) / max(1, K) / 2))
             jittered = []
@@ -312,24 +229,6 @@ class VERandomDataset(Dataset):
             idxs = [max(0, min(total_frames - 1, i)) for i in idxs]
             clips.append(idxs)
         return clips
-
-    def _get_random_clip_idxs(self, total_frames, frame_interval):
-        """One random-position clip at the backbone's native stride.
-
-        Span = num_out_frames * frame_interval native frames. Random start in
-        [0, total_frames - span]. If the video is shorter than the span,
-        falls back to a stretched clip over the entire video — that way the
-        sample is still usable for very short videos.
-
-        Used at training time when --train_random_crop is set: each epoch
-        sees a different random window of the same video, which doubles as
-        natural temporal augmentation.
-        """
-        span = self.num_out_frames * frame_interval
-        if total_frames <= span:
-            return self._decimate_idxs(0, total_frames - 1, self.num_out_frames)
-        start = int(np.random.randint(0, total_frames - span + 1))
-        return [start + i * frame_interval for i in range(self.num_out_frames)]
 
     def _get_dense_clip_idxs(self, total_frames, fi):
         """Dense N-clip sampling at native stride; optional temporal overlap.
@@ -405,26 +304,16 @@ class VERandomDataset(Dataset):
 
         eeg = self._get_full_eeg(row)
 
+
         eeg_time_to_frames = math.floor(math.floor((eeg.shape[0] / self.eeg_sampling_rate)) * fps)
         total_frames = min(video_orig.shape[0], eeg_time_to_frames)
 
         if total_frames < self.num_out_frames:
             return self.__getitem__((idx + 1) % len(self.df))
 
-        # Train-time random temporal crop: single random clip at native stride,
-        # regardless of num_clips. Val/test keep the configured K-clip behaviour
-        _use_train_random_crop = (
-            self.train_random_crop
-            and self.split.lower() == "train"
-        )
-
         if self.dense_video_clips:
-            # Dense N-clip mode: non-overlapping clips at native stride covering
-            # the whole video. N is variable per sample (depends on video length).
-            # Custom collate (dense_video_collate_fn) pads N to batch-max so
-            # tensors stack cleanly; model side mask-pools using `video_length`.
-            # EEG always uses the full-signal single-window view here (the
-            # dense N axis is video-only).
+            # Dense N-clip mode: variable-N non-overlapping clips covering the whole
+            # video (collate pads to batch-max); EEG uses the full-signal window.
             fi = self._effective_fi(fps)
             all_idxs = self._get_dense_clip_idxs(total_frames, fi)
             videos = []
@@ -446,7 +335,7 @@ class VERandomDataset(Dataset):
                 eeg = self.eeg_transform(eeg).contiguous()
 
             output = self._get_label(row)
-            return {
+            _ret = {
                 "video": video,                                  # [N, T, C, H, W]
                 "eeg": eeg,                                      # 4D, full-signal
                 "eeg_local": eeg_local,
@@ -454,31 +343,15 @@ class VERandomDataset(Dataset):
                 "video_length": torch.tensor(len(all_idxs), dtype=torch.long),
                 "sample_idx": torch.tensor(idx, dtype=torch.long),  # for cross-epoch feature cache
             }
+            if getattr(self, "return_meta", False):
+                # Eval-only: stable per-sample id for cross-model alignment. Gated → no
+                # effect on training (default False).
+                _ret["index"] = torch.tensor(idx, dtype=torch.long)
+                _ret["path"] = video_path
+                _ret["eeg_path"] = str(row.EEG)
+            return _ret
 
-        if _use_train_random_crop:
-            video_idxs = self._get_random_clip_idxs(total_frames, self._effective_fi(fps))
-            video = video_orig[video_idxs, ...]
-            if self.video_transform is not None:
-                video = self.video_transform(video)
-            # EEG decoupled from the tiny random video clip: CBraMod prefers
-            # ~10s-scale windows close to its pretraining distribution. With
-            # eeg_full_signal=True (default), use the whole-video span so
-            # train and val see the same EEG distribution (val K-clip path
-            # uses the same full-view rule below). Set eeg_full_signal=False
-            # to fall back to legacy clip-aligned EEG.
-            if self.eeg_full_signal:
-                eeg_video_idxs = self._get_random_frame_idxs(total_frames, fps)
-            else:
-                eeg_video_idxs = video_idxs
-            eeg_idxs = self._get_corresponding_eeg_idxs(eeg_video_idxs, fps)
-            eeg = eeg[eeg_idxs, ...]
-            if "Emognition" in self.csv_file:
-                eeg = torch.nan_to_num(eeg)
-            if self.eeg_transform is not None:
-                eeg_local = self.eeg_transform_local(eeg).contiguous()
-                eeg = self.eeg_transform(eeg).contiguous()
-
-        elif self.num_clips > 1:
+        if self.num_clips > 1:
             # K uniform clips for video. EEG: K aligned slices (default) or single full-view (eeg_full_signal).
             all_idxs = self._get_k_clip_frame_idxs(
                 total_frames, self.num_clips, frame_interval=self._effective_fi(fps)
@@ -517,20 +390,11 @@ class VERandomDataset(Dataset):
                 eeg = torch.stack(eegs)            # [K, ...]
                 eeg_local = torch.stack(eeg_locals)
         else:
-            if self.motion_sampler:
-                video_slice = video_orig[:total_frames, ...]
-                video_idxs = self._get_sampler_frame_idxs(
-                    total_frames=total_frames,
-                    fps=fps,
-                    video_tensor=video_slice,
-                )
-            else:
-                video_idxs = self._get_random_frame_idxs(total_frames, fps)
+            video_idxs = self._get_random_frame_idxs(total_frames, fps)
 
             video = video_orig[video_idxs, ...]
 
             if self.video_transform is not None:
-                # Single call on [T, C, H, W] keeps the flip/jitter decision
                 video = self.video_transform(video)
 
             eeg_idxs = self._get_corresponding_eeg_idxs(video_idxs, fps)
@@ -545,12 +409,19 @@ class VERandomDataset(Dataset):
 
         output = self._get_label(row)
 
-        return {
+        _ret = {
             "video": video,      # [T,C,H,W] (K=1) or [K,T,C,H,W] (K>1)
             "eeg": eeg,          # [S,Ch] (K=1) or [K,S,Ch] (K>1)
             "eeg_local": eeg_local,
             "output": output
         }
+        if getattr(self, "return_meta", False):
+            # Eval-only: stable per-sample id for cross-model alignment. Gated → no
+            # effect on training (default False).
+            _ret["index"] = torch.tensor(idx, dtype=torch.long)
+            _ret["path"] = video_path
+            _ret["eeg_path"] = str(row.EEG)
+        return _ret
 
     @staticmethod
     def _map_to_5cls(x: int):
@@ -597,7 +468,6 @@ class VERandomDataset(Dataset):
 class EAVDataset(VERandomDataset):
     def __init__(
             self,
-            motion_sampler,
             csv_file,
             time_window = 15.0,
             split="train",
@@ -610,7 +480,6 @@ class EAVDataset(VERandomDataset):
             ):
 
         super(EAVDataset,self).__init__(
-                motion_sampler=motion_sampler,
                 csv_file = csv_file,
                 eeg_sampling_rate = 500,
                 time_window = time_window,
@@ -628,7 +497,6 @@ class EAVDataset(VERandomDataset):
 class MDMERDataset(VERandomDataset):
     def __init__(
             self,
-            motion_sampler,
             csv_file,
             time_window = 15.0,
             split="train",
@@ -641,14 +509,12 @@ class MDMERDataset(VERandomDataset):
             num_clips = 1,
             frame_interval = 2,
             eeg_full_signal = False,
-            train_random_crop = False,
             fps_normalize = False,
             dense_video_clips = False,
             clip_overlap_ratio = 0.0,
             ):
 
         super(MDMERDataset,self).__init__(
-                motion_sampler=motion_sampler,
                 csv_file = csv_file,
                 eeg_sampling_rate = 300,
                 time_window = time_window,
@@ -664,7 +530,6 @@ class MDMERDataset(VERandomDataset):
                 num_clips = num_clips,
                 frame_interval = frame_interval,
                 eeg_full_signal = eeg_full_signal,
-                train_random_crop = train_random_crop,
                 fps_normalize = fps_normalize,
                 dense_video_clips = dense_video_clips,
                 clip_overlap_ratio = clip_overlap_ratio,
@@ -673,7 +538,6 @@ class MDMERDataset(VERandomDataset):
 class EmognitionDataset(VERandomDataset):
     def __init__(
             self,
-            motion_sampler,
             csv_file,
             time_window = 30.0,
             split="train",
@@ -686,14 +550,12 @@ class EmognitionDataset(VERandomDataset):
             num_clips = 1,
             frame_interval = 2,
             eeg_full_signal = False,
-            train_random_crop = False,
             fps_normalize = False,
             dense_video_clips = False,
             clip_overlap_ratio = 0.0,
             ):
 
         super(EmognitionDataset,self).__init__(
-                motion_sampler=motion_sampler,
                 csv_file = csv_file,
                 eeg_sampling_rate = 256,
                 time_window = time_window,
@@ -709,7 +571,6 @@ class EmognitionDataset(VERandomDataset):
                 num_clips = num_clips,
                 frame_interval = frame_interval,
                 eeg_full_signal = eeg_full_signal,
-                train_random_crop = train_random_crop,
                 fps_normalize = fps_normalize,
                 dense_video_clips = dense_video_clips,
                 clip_overlap_ratio = clip_overlap_ratio,

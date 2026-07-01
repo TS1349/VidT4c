@@ -3,7 +3,8 @@ checkpoints/
 checkpoints_5/
 checkpoints_clip/
 .feature_cache/
-datasets/
+datasets/*
+!datasets/updated_fold_csv_files/
 pretrained/
 emognition_plots/
 mdmer_plots/
@@ -37,3 +38,50 @@ nohup.out
 .env.*
 *.key
 *.token
+
+# --- EAV / SLURM run artifacts ------------------------------------
+NJZ_logs/
+oracle_cache/
+.chain_logs_eeg/
+logs_*.txt
+logs_compare*/
+*.out
+
+# --- abandoned-technique test/sanity checkpoints ---
+checkpoints_*test/
+checkpoints_sanity/
+checkpoints_pgtest/
+checkpoints_pdftest/
+
+# --- analysis / experiment log dirs (regenerable artifacts) ---
+logs_affinity/
+logs_adaptive_gate/
+logs_relgatev2/
+logs_region_eeg_only/
+
+# --- session scratch / handoff dumps ---
+CONVO_RESTORE.md
+HANDOFF.md
+
+# --- archived abandoned-technique code/scripts (local-only) ---
+archive_code/
+archive_scripts/
+
+# --- internal docs / analysis (local-only) ---
+SESSION_CONTEXT.md
+affinity_analysis_result.txt
+analyze_affinity_detailed.py
+analyze_affinity_sets.py
+analyze_complementarity.py
+analyze_sets.py
+viz_sets.py
+
+# --- run scripts local-only (only slurm/ is committed) ---
+/run_*.sh
+
+# --- collected log txt folder ---
+logs/
+
+# --- only README.md is committed; all other md local-only ---
+*.md
+!README.md
