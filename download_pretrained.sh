@@ -6,6 +6,7 @@
 #   checkpoint-199.pth (1.17G) AdaMAE   (benchmark)
 #   tsf.pth (465M)            TSF        (benchmark)
 #   labram.pth (93M)          LaBraM    (benchmark, EEG)
+#   biot.ckpt (14M)           BIOT       (benchmark, EEG)
 # ViViT / Swin / REVE self-download from HuggingFace/torchvision (no file needed).
 set -e
 cd "$(dirname "$0")"
@@ -22,6 +23,6 @@ echo "downloading pretrained weights into ./pretrained/ ..."
 gdown --folder "$GDRIVE_FOLDER_URL" -O pretrained --remaining-ok
 
 echo "done. verifying:"
-for f in vemt_v0.pth cbramod.pth checkpoint-199.pth tsf.pth labram.pth; do
+for f in vemt_v0.pth cbramod.pth checkpoint-199.pth tsf.pth labram.pth biot.ckpt; do
   if [ -f "pretrained/$f" ]; then echo "  OK  $f"; else echo "  MISSING  $f"; fi
 done

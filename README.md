@@ -35,6 +35,7 @@ bash download_pretrained.sh   # pulls all 5 files into pretrained/
 | `checkpoint-199.pth` | 1.17G | AdaMAE (benchmark) |
 | `tsf.pth` | 465M | TSF (benchmark) |
 | `labram.pth` | 93M | LaBraM (benchmark, EEG) |
+| `biot.ckpt` | 14M | BIOT (benchmark, EEG) |
 
 ViViT / Swin / REVE download their own weights from HuggingFace / torchvision at
 first run — no local file needed.
