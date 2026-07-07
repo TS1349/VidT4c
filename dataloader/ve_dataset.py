@@ -477,6 +477,12 @@ class EAVDataset(VERandomDataset):
             eeg_transform_local=None,
             num_out_frames = 32,
             num_out_eeg = 64,
+            num_clips = 1,
+            frame_interval = 2,
+            eeg_full_signal = False,
+            fps_normalize = False,
+            dense_video_clips = False,
+            clip_overlap_ratio = 0.0,
             ):
 
         super(EAVDataset,self).__init__(
@@ -492,6 +498,12 @@ class EAVDataset(VERandomDataset):
                 num_out_eeg = num_out_eeg,
                 output_shape = (5,1),
                 eeg_channel_count = 30,
+                num_clips = num_clips,
+                frame_interval = frame_interval,
+                eeg_full_signal = eeg_full_signal,
+                fps_normalize = fps_normalize,
+                dense_video_clips = dense_video_clips,
+                clip_overlap_ratio = clip_overlap_ratio,
         )
 
 class MDMERDataset(VERandomDataset):
