@@ -19,6 +19,26 @@ conda activate tsf-low
 Pretrained video/EEG backbones go under `pretrained/`, raw data under
 `datasets/` (only the fold CSVs are tracked in git).
 
+### Pretrained weights
+
+Backbone weights are too large for git and are hosted on Google Drive. Fetch them
+into `pretrained/` with:
+
+```bash
+bash download_pretrained.sh   # pulls all 5 files into pretrained/
+```
+
+| file | size | backbone |
+|------|------|----------|
+| `vemt_v0.pth` | 360M | VideoMAE (ours) |
+| `cbramod.pth` | 19M | CBraMod (ours, EEG) |
+| `checkpoint-199.pth` | 1.17G | AdaMAE (benchmark) |
+| `tsf.pth` | 465M | TSF (benchmark) |
+| `labram.pth` | 93M | LaBraM (benchmark, EEG) |
+
+ViViT / Swin / REVE download their own weights from HuggingFace / torchvision at
+first run — no local file needed.
+
 ## Running
 
 Our fusion (GCN, clip + temporal + PE) — AdaMAE + CBraMod on Emognition:
