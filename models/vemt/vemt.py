@@ -127,20 +127,34 @@ class GCN(nn.Module):
         self.gcn1_norm = nn.LayerNorm(input_dim)
 
         if self.type == "region":
-            self.weight = nn.Parameter(torch.full((output_dim,), -1.0))
-
-            # --adaptive_gate: sample-adaptive fusion gate conditioned on
-            # [video_logit; eeg_logit] instead of the static self.weight.
-            if getattr(args, 'adaptive_gate', False):
-                self.gate_mlp = nn.Sequential(
-                    nn.Linear(output_dim * 2, output_dim),
-                    nn.GELU(),
-                    nn.Linear(output_dim, output_dim),
-                )
-                nn.init.constant_(self.gate_mlp[-1].bias, 0.0)
-            self._last_gate_w_batch = None   # [B] per-sample mean video share (logging)
+            # --fusion_gate_fixed <p> pins the video-share to a CONSTANT p and freezes
+            # it (requires_grad=False) → out=(1-p)*eeg+p*video with p fixed, so the
+            # video branch always gets p of the gradient (counters modality imbalance).
+            # Default (None) keeps the legacy learnable -1.0 logit (=0.269).
+            _gf = getattr(args, 'fusion_gate_fixed', None)
+            if _gf is not None:
+                self.weight = nn.Parameter(
+                    torch.full((output_dim,), math.log(_gf / (1.0 - _gf))), requires_grad=False)
+            else:
+                self.weight = nn.Parameter(torch.full((output_dim,), -1.0))
 
             # Learnable Gaussian std (log space) for --gcn_temporal_adj prior.
+            self.log_sigma = nn.Parameter(torch.log(torch.tensor(3.0)))
+
+            # --fusion_gat: learn edge weights via GAT attention instead of cosine.
+            if getattr(args, 'fusion_gat', False):
+                self.gat_proj = nn.Linear(input_dim, input_dim)
+                self.gat_src = nn.Linear(input_dim, 1)
+                self.gat_dst = nn.Linear(input_dim, 1)
+            # --fusion_crossattn: learn cross-modal mixing via node self-attention.
+            if getattr(args, 'fusion_crossattn', False):
+                self.cross_tf = nn.TransformerEncoderLayer(
+                    d_model=input_dim, nhead=4, dim_feedforward=input_dim * 2,
+                    dropout=0.1, batch_first=True)
+                self.cross_head = nn.Linear(input_dim, output_dim)
+
+        # video-clip GCN (--gcn_video_local) uses the same temporal prior.
+        if self.type == "local":
             self.log_sigma = nn.Parameter(torch.log(torch.tensor(3.0)))
 
     def compute_local_adj(self, B, C, region_indices, device):
@@ -200,15 +214,9 @@ class GCN(nn.Module):
             adj_mask[eeg_start:eeg_end, :K_v] = 1
 
         # all clip globals <-> regions; region <-> region.
-        # --gcn_region_eeg_only cuts video<->region so regions aggregate only
-        # from {EEG, other regions}.
         if n_main > region_start:
-            if getattr(self.args, 'gcn_region_eeg_only', False):
-                adj_mask[eeg_start:region_start, region_start:n_main] = 1
-                adj_mask[region_start:n_main, eeg_start:region_start] = 1
-            else:
-                adj_mask[:region_start, region_start:n_main] = 1
-                adj_mask[region_start:n_main, :region_start] = 1
+            adj_mask[:region_start, region_start:n_main] = 1
+            adj_mask[region_start:n_main, :region_start] = 1
             adj_mask[region_start:n_main, region_start:n_main] = 1
             ridx = torch.arange(region_start, n_main, device=device)
             adj_mask[ridx, ridx] = 0
@@ -245,12 +253,26 @@ class GCN(nn.Module):
         # Non-temporal pairs (region-anything): weight 1.0 → no modulation.
         return torch.where(both_time, gauss, torch.ones_like(gauss))
 
+    def _gat_adj(self, x, adj_mask, temporal_weight=None):
+        Wh = self.gat_proj(x)
+        e = self.gat_src(Wh) + self.gat_dst(Wh).transpose(1, 2)   # [B,N,N]
+        e = F.leaky_relu(e, 0.2)
+        if temporal_weight is not None:
+            e = e + torch.log(temporal_weight.unsqueeze(0).clamp_min(1e-6))
+        e = e.masked_fill(~adj_mask.bool().unsqueeze(0), float('-inf'))
+        A = torch.softmax(e, dim=-1)
+        return torch.nan_to_num(A, nan=0.0)
+
     def forward(self, x, region_indices=None, proto_dim_sizes=(),
                 num_video_nodes=1, num_eeg_nodes=1, node_time_pos=None):
         if self.type == "local":
             B, C, D = x.shape
             adj_mask = self.compute_local_adj(B, C, region_indices, x.device)
-            adj = build_normalized_adj(x, adj_mask, eps=1e-3, self_loop=0.0, keep_neg=True)
+            temporal_weight = None
+            if node_time_pos is not None and getattr(self.args, 'gcn_temporal_adj', False):
+                temporal_weight = self._compute_temporal_weight(node_time_pos, x.device)
+            adj = build_normalized_adj(x, adj_mask, eps=1e-3, self_loop=0.0, keep_neg=True,
+                                       temporal_weight=temporal_weight)
             x1 = self.gcn1(x, adj)
             x1 = F.gelu(x1)
             x1 = self.gcn1_norm(x1)
@@ -276,17 +298,23 @@ class GCN(nn.Module):
             if getattr(self.args, 'gcn_temporal_adj', False) and node_time_pos is not None:
                 temporal_weight = self._compute_temporal_weight(node_time_pos, x.device)
 
-            adj = build_normalized_adj(
-                x, adj_mask,
-                eps=1e-3, self_loop=0.0, keep_neg=True,
-                temporal_weight=temporal_weight,
-            )
-
-            x1 = self.gcn1(x, adj)
-            x1 = F.gelu(x1)
-            x1 = self.gcn1_norm(x1)
-            x1 = 0.5 * x1 + 0.5 * x
-            x1 = self.gcn2(x1, adj)
+            if getattr(self.args, 'fusion_crossattn', False):
+                x1 = self.cross_tf(x)
+                x1 = self.cross_head(x1)
+            else:
+                if getattr(self.args, 'fusion_gat', False):
+                    adj = self._gat_adj(x, adj_mask, temporal_weight)
+                else:
+                    adj = build_normalized_adj(
+                        x, adj_mask,
+                        eps=1e-3, self_loop=0.0, keep_neg=True,
+                        temporal_weight=temporal_weight,
+                    )
+                x1 = self.gcn1(x, adj)
+                x1 = F.gelu(x1)
+                x1 = self.gcn1_norm(x1)
+                x1 = 0.5 * x1 + 0.5 * x
+                x1 = self.gcn2(x1, adj)
 
             # Pool post-GCN nodes per modality: video=global_f1, eeg=global_f2.
             if K_v > 1:
@@ -298,13 +326,7 @@ class GCN(nn.Module):
             else:
                 global_f2 = x1[:, K_v, :]
 
-            if getattr(self.args, 'adaptive_gate', False):
-                gate_in = torch.cat([global_f1, global_f2], dim=-1)   # [B, 2*D_out]
-                w = torch.sigmoid(self.gate_mlp(gate_in))             # [B, D_out]
-                self._last_gate_w_batch = w.detach().mean(dim=-1)     # [B]
-            else:
-                w = torch.sigmoid(self.weight)                        # [D_out] (static)
-                self._last_gate_w_batch = None
+            w = torch.sigmoid(self.weight)                        # [D_out] (static)
             out = (1 - w) * global_f2 + w * global_f1
 
             return out  # [B, D_out]
@@ -464,28 +486,18 @@ class VEMT(nn.Module):
                 self.gcn_local = GCN(args, input_dim=self.embed_dim, output_dim=self.embed_dim, type= "local")
                 self.gcn_region = GCN(args, input_dim=self.embed_dim, output_dim=self.num_classes, type = "region")
                 self.region_pool = RegionalAttentionPool(d_model=self.embed_dim)
-
-                # --relresfuse: post-GCN reliability-guided residual fusion (aux unimodal
-                # heads + per-sample per-axis gate supervised by a soft-CE target).
-                if getattr(args, 'relresfuse', False):
-                    if not hasattr(self, 'aux_video_head'):
-                        self.aux_video_head = nn.Linear(768, self.num_classes)
-                        self.aux_eeg_head = nn.Linear(768, self.num_classes)
-                    _n_axes = len(self.output_dim) if isinstance(self.output_dim, (tuple, list)) else 1
-                    self._relv2_axes = max(1, _n_axes)
-                    self.relv2_gate = nn.Sequential(
-                        nn.Linear(768 * 2, 256), nn.GELU(), nn.Dropout(0.1),
-                        nn.Linear(256, 2 * self._relv2_axes),   # [B, 2 modalities × n_axes]
-                    )
-                    # Learnable residual scale; init 0 → output == baseline GCN at step 0.
-                    self._relv2_res = nn.Parameter(
-                        torch.tensor(float(getattr(args, 'relresfuse_res', 0.0)))
-                    )
-                    self._relv2_kl = float(getattr(args, 'relresfuse_kl', 0.3))
-                    self._relv2_uni = float(getattr(args, 'relresfuse_uni', 0.5))
-                    self._relv2_tau = float(getattr(args, 'relresfuse_tau', 0.5))
-                    self._relv2_aux = None          # stashed each train forward for the trainer
-                    self._relv2_gw = None           # (video_share, eeg_share) for logging
+                # --fusion_misa: shared/private decomposition of the two modalities.
+                if getattr(args, 'fusion_misa', False):
+                    self.misa_shared = nn.Linear(self.embed_dim, self.embed_dim)
+                    self.misa_priv_v = nn.Linear(self.embed_dim, self.embed_dim)
+                    self.misa_priv_e = nn.Linear(self.embed_dim, self.embed_dim)
+                    self.misa_head = nn.Linear(self.embed_dim * 4, self.num_classes)
+                # --gcn_video_local: refine video clip nodes among themselves before
+                # the joint graph (mirrors gcn_local for EEG channels).
+                if getattr(args, 'gcn_video_local', False):
+                    self.gcn_video_local = GCN(args, input_dim=self.embed_dim, output_dim=self.embed_dim, type="local")
+                    if getattr(args, 'gcn_video_local_attn', False):
+                        self.gcn_video_local_pool = nn.Linear(self.embed_dim, 1)
 
                 self.use_region_importance = False
 
@@ -1090,6 +1102,29 @@ class VEMT(nn.Module):
         logit, feat = self._pool_clips(feat_flat, logit_flat, B, K, modality='eeg')
         return logit, feat
 
+    @staticmethod
+    def _orth(a, b):
+        a = F.normalize(a, dim=-1)
+        b = F.normalize(b, dim=-1)
+        return (a * b).sum(dim=-1).pow(2).mean()
+
+    def _misa_fuse(self, v_nodes, e_nodes, eeg_region):
+        vv = v_nodes.mean(dim=1)
+        ee = torch.cat([e_nodes, eeg_region], dim=1).mean(dim=1)
+        # one call each (stacked) so the shared encoder/decoder is not reused in a
+        # single backward (keeps DDP's reducer happy without static_graph).
+        shared = self.misa_shared(torch.stack([vv, ee], dim=1))   # [B, 2, D]
+        sv, se = shared[:, 0], shared[:, 1]
+        pv, pe = self.misa_priv_v(vv), self.misa_priv_e(ee)
+        out = self.misa_head(torch.cat([sv, se, pv, pe], dim=-1))
+        if self.training:
+            sim = F.mse_loss(sv, se)
+            diff = self._orth(sv, pv) + self._orth(se, pe)
+            self._fusion_aux = sim + 0.3 * diff
+        else:
+            self._fusion_aux = None
+        return out
+
     def forward(self, x):
         eeg = x["eeg"]
         video = x["video"].transpose_(-3, -4)
@@ -1290,6 +1325,22 @@ class VEMT(nn.Module):
                     v_clip_nodes = video_node.unsqueeze(1)  # [B, 1, D]
                 num_video_nodes = v_clip_nodes.size(1)
 
+                # --gcn_video_local (stage 1b): refine clips with a Gaussian-temporal
+                # clip GCN and pool to a single video node, so the joint graph holds
+                # [1 video, 1 eeg, R regions] instead of K_v flooding video clips.
+                if getattr(self.args, 'gcn_video_local', False) and num_video_nodes > 1:
+                    _vt = torch.arange(num_video_nodes, device=v_clip_nodes.device)
+                    if getattr(self.args, 'gcn_clip_pe', False):
+                        v_clip_nodes = v_clip_nodes + self._sinusoid_pe(
+                            num_video_nodes, v_clip_nodes.size(-1), v_clip_nodes.device).unsqueeze(0)
+                    v_clip_nodes = self.gcn_video_local(v_clip_nodes, region_indices=None, node_time_pos=_vt)
+                    if getattr(self.args, 'gcn_video_local_attn', False):
+                        _a = torch.softmax(self.gcn_video_local_pool(v_clip_nodes), dim=1)  # [B, Kv, 1]
+                        v_clip_nodes = (_a * v_clip_nodes).sum(dim=1, keepdim=True)          # [B, 1, D]
+                    else:
+                        v_clip_nodes = v_clip_nodes.mean(dim=1, keepdim=True)                # [B, 1, D]
+                    num_video_nodes = 1
+
                 e_clip_nodes = eeg_node.unsqueeze(1)    # [B, 1, D]
                 num_eeg_nodes = e_clip_nodes.size(1)
 
@@ -1325,12 +1376,15 @@ class VEMT(nn.Module):
                         num_eeg_nodes, device=all_nodes.device,
                     )
 
-                output = self.gcn_region(
-                    all_nodes,
-                    num_video_nodes=num_video_nodes,
-                    num_eeg_nodes=num_eeg_nodes,
-                    node_time_pos=_node_t,
-                )
+                if getattr(self.args, 'fusion_misa', False):
+                    output = self._misa_fuse(v_clip_nodes, e_clip_nodes, eeg_region)
+                else:
+                    output = self.gcn_region(
+                        all_nodes,
+                        num_video_nodes=num_video_nodes,
+                        num_eeg_nodes=num_eeg_nodes,
+                        node_time_pos=_node_t,
+                    )
 
             else:
                 fused_f = F.normalize(fused_f, dim=-1)
@@ -1343,39 +1397,5 @@ class VEMT(nn.Module):
                     output_v = output[:, :self.output_dim[0]].unsqueeze(-1)
                     output_a = output[:, self.output_dim[0]:].unsqueeze(-1)
                     output = torch.cat((output_v, output_a), dim=-1)
-
-                if getattr(self.args, 'relresfuse', False):
-                    # Reliability-Guided Residual Fusion (see __init__).
-                    _C = self.output_dim[0]
-                    _lv = self.aux_video_head(video_f)      # [B, 2C]
-                    _le = self.aux_eeg_head(eeg_f)
-                    logit_video = torch.cat((_lv[:, :_C].unsqueeze(-1), _lv[:, _C:].unsqueeze(-1)), dim=-1)  # [B,C,2]
-                    logit_eeg = torch.cat((_le[:, :_C].unsqueeze(-1), _le[:, _C:].unsqueeze(-1)), dim=-1)
-                    # per-sample, per-axis reliability gate α [B, mod, axis]
-                    g = self.relv2_gate(torch.cat([video_f, eeg_f], dim=-1))    # [B, 2*axes]
-                    g = g.view(g.size(0), 2, self._relv2_axes)                  # [B, mod, axis]
-                    alpha = torch.softmax(g, dim=1)                            # over modality, per axis
-                    av, ae = alpha[:, 0, :], alpha[:, 1, :]                     # [B, axis]
-                    # POST-GCN residual on DETACHED clean unimodal logits.
-                    res = av.unsqueeze(1) * logit_video.detach() + ae.unsqueeze(1) * logit_eeg.detach()
-                    output = output + self._relv2_res * res                     # [B, C, axis]
-                    self._relv2_gw = av.detach().mean(dim=-1)                   # [B] per-sample video share
-                    self._relv2_aux = None
-                    if self.training and ('output' in x):
-                        tgt = x['output']
-                        lv_v, lv_a = logit_video[:, :, 0], logit_video[:, :, 1]
-                        le_v, le_a = logit_eeg[:, :, 0], logit_eeg[:, :, 1]
-                        # (a) unimodal CE → keep shared backbone unimodal-discriminative
-                        uni = 0.25 * (F.cross_entropy(lv_v, tgt[:, 0]) + F.cross_entropy(lv_a, tgt[:, 1])
-                                      + F.cross_entropy(le_v, tgt[:, 0]) + F.cross_entropy(le_a, tgt[:, 1]))
-                        # (b) gate KL toward live soft-CE reliability target q = softmax(-CE/τ)
-                        with torch.no_grad():
-                            cev = torch.stack([F.cross_entropy(lv_v, tgt[:, 0], reduction='none'),
-                                               F.cross_entropy(lv_a, tgt[:, 1], reduction='none')], dim=-1)
-                            cee = torch.stack([F.cross_entropy(le_v, tgt[:, 0], reduction='none'),
-                                               F.cross_entropy(le_a, tgt[:, 1], reduction='none')], dim=-1)
-                            q = torch.softmax(-torch.stack([cev, cee], dim=1) / self._relv2_tau, dim=1)  # [B,mod,axis]
-                        gate_kl = F.kl_div(torch.log_softmax(g, dim=1), q, reduction='batchmean')
-                        self._relv2_aux = self._relv2_uni * uni + self._relv2_kl * gate_kl
 
         return output

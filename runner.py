@@ -707,9 +707,7 @@ def run(
     device = torch.device(f"cuda:{rank}")
     model.to(device)
 
-    # --relresfuse reuses backbone features across aux branches → needs
-    # static_graph=True so DDP's reducer doesn't trip on reused params.
-    _static_graph = bool(getattr(args, 'relresfuse', False))
+    _static_graph = False
     model = DDP(model, device_ids=[rank],
             find_unused_parameters=(not _static_graph),
             static_graph=_static_graph)
@@ -794,6 +792,7 @@ def run(
 
         gcn_keywords = [
             "gcn_local",
+            "gcn_video_local",
             "gcn_region",
             "region_pool",
             "eeg_feat_proj",
@@ -1170,41 +1169,22 @@ if "__main__" == __name__:
                         help='Add sinusoidal positional embedding to video/EEG clip nodes before '
                              'they enter the GCN region graph. Parameter-free, lets the GCN '
                              'distinguish "which clip in time" each node represents.')
-    parser.add_argument('--adaptive_gate', action='store_true', default=False,
-                        help='v2 fusion gate: replace the static, input-independent gate '
-                             'self.weight (out=(1-sigmoid(w))*eeg + sigmoid(w)*video) with a '
-                             'SAMPLE-adaptive MLP gate w=sigmoid(MLP([video_logit; eeg_logit])). '
-                             'The static gate freezes at init (video share 0.27) because its '
-                             'gradient cancels across samples that need video vs EEG; the '
-                             'adaptive gate routes per-sample so its gradient no longer cancels. '
-                             'Last layer init (zero weight, -1.0 bias) → identical to the static '
-                             'baseline at step 0, then learns. arg-gated, default-off: baseline '
-                             'untouched. Per-epoch mean video share logged to gate_log.txt.')
-    parser.add_argument('--gcn_region_eeg_only', action='store_true', default=False,
-                        help='Ablation A: cut video<->region edges in the GCN region graph. '
-                             'With K_v dense video clips (e.g. 149), every region connects to '
-                             'all clips → the shared video flood homogenizes regions (affinity: '
-                             'per-region degree near-identical). This connects regions only to '
-                             'EEG + other regions so they can differentiate. arg-gated, default-off.')
-    parser.add_argument('--relresfuse', action='store_true', default=False,
-                        help='Reliability-Guided Residual Fusion (distinct from the old '
-                             '--reliability_gate / --rel_gate_v2 relgate flags). Unimodal aux '
-                             'heads (kept CE-discriminative → de-corrupt shared backbone) + a '
-                             'per-sample per-axis gate α supervised toward a live soft-CE '
-                             'reliability target q=softmax(-CE/τ); output = GCN_fusion + '
-                             'res·Σ(α_v·logit_v + α_e·logit_e) on DETACHED unimodal logits '
-                             '(POST-GCN residual, so routing survives and GCN stays the floor). '
-                             'arg-gated, default-off.')
-    parser.add_argument('--relresfuse_res', type=float, default=0.0,
-                        help='--relresfuse INITIAL value of the LEARNABLE residual scale. '
-                             'Default 0.0 → output == baseline GCN at step 0; the residual '
-                             'grows only where it helps (avoids perturbing a good baseline).')
-    parser.add_argument('--relresfuse_kl', type=float, default=0.3,
-                        help='--relresfuse weight on the gate KL(α || q) supervision loss.')
-    parser.add_argument('--relresfuse_uni', type=float, default=0.5,
-                        help='--relresfuse weight on the unimodal CE (keeps backbone discriminative).')
-    parser.add_argument('--relresfuse_tau', type=float, default=0.5,
-                        help='--relresfuse temperature for the soft-CE reliability target q.')
+    parser.add_argument('--gcn_video_local_attn', action='store_true', default=False,
+                        help='video-local pooling: attention (Linear scorer -> softmax) instead of mean.')
+    parser.add_argument('--gcn_video_local', action='store_true', default=False,
+                        help='Stage 1b: refine video clips with a Gaussian-temporal clip GCN '
+                             'and pool to a single video node, so the joint graph holds '
+                             '[1 video, 1 eeg, R regions] instead of K_v video clips.')
+    parser.add_argument('--fusion_gate_fixed', type=float, default=None,
+                        help='Pin the fusion gate video-share to a CONSTANT (non-learnable) value, '
+                             'e.g. 0.65 = video 65%% / eeg 35%%. Counters modality imbalance by giving '
+                             'the chosen modality a fixed gradient share. arg-gated, default-off.')
+    parser.add_argument('--fusion_gat', action='store_true', default=False,
+                        help='Joint-graph edges from GAT attention instead of cosine similarity.')
+    parser.add_argument('--fusion_crossattn', action='store_true', default=False,
+                        help='Replace joint-graph message passing with node self-attention (transformer).')
+    parser.add_argument('--fusion_misa', action='store_true', default=False,
+                        help='Shared/private modality decomposition (MISA) with similarity/difference/recon aux.')
     parser.add_argument('--gcn_region_eeg_source', type=str, default='stft',
                         choices=('stft', 'cbramod'),
                         help='Per-channel EEG feature source for the GCN region nodes. '

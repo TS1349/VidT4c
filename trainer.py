@@ -170,9 +170,6 @@ class PTrainer:
                 output = model_out
                 per_clip_logits = None
             coral_loss = torch.zeros((), device=self.device)
-            # --relresfuse stashes its supervised aux loss (unimodal CE + gate KL).
-            _inner = self.model.module if hasattr(self.model, 'module') else self.model
-            _relv2_aux = getattr(_inner, '_relv2_aux', None)
 
             target = sample["output"]
 
@@ -193,14 +190,10 @@ class PTrainer:
 
             combined = (1-self.w_ce) * focal_va + self.w_ce * ce_va
 
-            # --relresfuse: add supervised reliability aux loss (unimodal CE + gate KL).
-            if _relv2_aux is not None:
-                combined = combined + _relv2_aux
-                if self.is_main and batch_number == 0:
-                    _rs = getattr(_inner, '_relv2_res', None)
-                    _rs = _rs.item() if _rs is not None else float('nan')
-                    print(f"[relresfuse] epoch={epoch} aux_loss={_relv2_aux.item():.4f} "
-                          f"main_combined={(combined - _relv2_aux).item():.4f} res_scale={_rs:+.4f}")
+            _inner = self.model.module if hasattr(self.model, 'module') else self.model
+            _fusion_aux = getattr(_inner, '_fusion_aux', None)
+            if _fusion_aux is not None:
+                combined = combined + _fusion_aux
 
             # Per-clip auxiliary loss (set_video_only K-clip path only).
             if self.per_clip_aux_loss_w > 0.0 and per_clip_logits is not None:
@@ -303,13 +296,6 @@ class PTrainer:
         router_w_sum = None
         router_w_count = torch.tensor(0.0, device=self.device)
 
-        # --adaptive_gate: accumulate per-sample video share for per-epoch logging.
-        gate_w_sum = torch.tensor(0.0, device=self.device)
-        gate_w_sumsq = torch.tensor(0.0, device=self.device)
-        gate_w_count = torch.tensor(0.0, device=self.device)
-        gate_w_min = torch.tensor(float("inf"), device=self.device)
-        gate_w_max = torch.tensor(float("-inf"), device=self.device)
-
         with torch.no_grad():
             for _, sample in enumerate(self.validation_dataloader):
                 paths = sample.get("path", None)
@@ -328,17 +314,6 @@ class PTrainer:
                 else:
                     preds = model_out
                 coral_loss = torch.zeros((), device=self.device)
-
-                _inner = self.model.module if hasattr(self.model, "module") else self.model
-                _gw = getattr(getattr(_inner, "gcn_region", None), "_last_gate_w_batch", None)
-                if _gw is None:
-                    _gw = getattr(_inner, "_relv2_gw", None)   # --rel_gate_v2 per-sample video share
-                if _gw is not None:
-                    gate_w_sum += _gw.sum()
-                    gate_w_sumsq += (_gw.float() ** 2).sum()
-                    gate_w_count += _gw.numel()
-                    gate_w_min = torch.minimum(gate_w_min, _gw.min())
-                    gate_w_max = torch.maximum(gate_w_max, _gw.max())
 
                 if preds.dim() == 3 and preds.size(-1) == 2:
                     if _eval_is_prob:
@@ -494,25 +469,6 @@ class PTrainer:
             all_preds_single = all_preds_single.cpu().numpy()
             all_targets_single = all_targets_single.cpu().numpy()
 
-        # --adaptive_gate: reduce gate share across ranks (collective; all ranks
-        # must call before the is_main early-return below).
-        if dist.is_available() and dist.is_initialized():
-            dist.all_reduce(gate_w_sum, op=dist.ReduceOp.SUM)
-            dist.all_reduce(gate_w_sumsq, op=dist.ReduceOp.SUM)
-            dist.all_reduce(gate_w_count, op=dist.ReduceOp.SUM)
-            dist.all_reduce(gate_w_min, op=dist.ReduceOp.MIN)
-            dist.all_reduce(gate_w_max, op=dist.ReduceOp.MAX)
-        if gate_w_count.item() > 0:
-            _n = gate_w_count
-            avg_gate_video_share = (gate_w_sum / _n).item()
-            _var = (gate_w_sumsq / _n).item() - avg_gate_video_share ** 2
-            gate_video_std = (max(_var, 0.0)) ** 0.5          # per-sample spread
-            gate_video_min = gate_w_min.item()
-            gate_video_max = gate_w_max.item()
-        else:
-            avg_gate_video_share = None
-            gate_video_std = gate_video_min = gate_video_max = None
-
         if not self.is_main:
             return
 
@@ -558,22 +514,6 @@ class PTrainer:
                     f"{val_f1_macro:.6f},{aro_f1_macro:.6f},"
                     f"{val_f1_weighted:.6f},{aro_f1_weighted:.6f}\n"
                 )
-
-            if avg_gate_video_share is not None:
-                tqdm.write(
-                    f"  [adaptive_gate/val] epoch {self.current_epoch}: "
-                    f"video_share mean={avg_gate_video_share:.4f} "
-                    f"std={gate_video_std:.4f} "
-                    f"[min={gate_video_min:.4f} max={gate_video_max:.4f}] "
-                    f"(eeg_share={1.0 - avg_gate_video_share:.4f}) "
-                    f"-- std>0 means the gate routes per-sample"
-                )
-                with open(os.path.join(self.log_dir, "gate_log.txt"), "a") as f:
-                    f.write(
-                        f"{self.current_epoch},{avg_gate_video_share:.6f},"
-                        f"{1.0 - avg_gate_video_share:.6f},"
-                        f"{gate_video_std:.6f},{gate_video_min:.6f},{gate_video_max:.6f}\n"
-                    )
 
             # Branch expert metrics
             eeg_val_acc = (total_correct_eeg_val / denom).item()
