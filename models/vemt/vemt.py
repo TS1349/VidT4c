@@ -83,19 +83,28 @@ class RegionalAttentionPool(nn.Module):
 
 
 def build_normalized_adj(x, adj_mask, eps=1e-3, self_loop=1.0, keep_neg=False,
-                         temporal_weight=None):
+                         temporal_weight=None, angular=False, edge_scale=None):
     """Symmetric normalized adjacency A = D^-1/2 S D^-1/2 from node features + mask.
 
     temporal_weight: optional [N, N] multiplied into the similarity before
     masking (Gaussian temporal-distance prior; 1.0 leaves an edge unaffected).
+    angular: use MMGCN angular similarity 1 - arccos(cos)/pi in [0,1] instead of
+    raw cosine (more discriminative, always non-negative).
+    edge_scale: optional [N, N] multiplied into the similarity after masking
+    (e.g. a learnable per-relation scale like MMGCN's cross-modal gamma).
     """
     x_norm = F.normalize(x, p=2, dim=-1)  # [B, N, D]
     S = torch.matmul(x_norm, x_norm.transpose(1, 2))  # [B, N, N]
 
-    if not keep_neg:
+    if angular:
+        S = 1.0 - torch.arccos(S.clamp(-1.0 + 1e-6, 1.0 - 1e-6)) / math.pi
+    elif not keep_neg:
         S = S.clamp_min(0.0)
 
     S = torch.where(adj_mask.bool().unsqueeze(0), S, torch.zeros_like(S))
+
+    if edge_scale is not None:
+        S = S * edge_scale.to(S.device).unsqueeze(0)
 
     if temporal_weight is not None:
         S = S * temporal_weight.to(S.device).unsqueeze(0)
@@ -151,6 +160,22 @@ class GCN(nn.Module):
 
             # Learnable Gaussian std (log space) for --gcn_temporal_adj prior.
             self.log_sigma = nn.Parameter(torch.log(torch.tensor(3.0)))
+
+            # --gcn_ii: GCNII propagation (Chen et al. ICML2020, as used by MMGCN)
+            # for the joint video/eeg graph. Initial residual to H^(0) keeps node
+            # identity in a BOUNDED convex combination (unlike the self-loop, which
+            # compounds and explodes), and identity mapping lets it go deep without
+            # oversmoothing so cross-modal edges actually propagate. gamma is a
+            # learnable scale on cross-modal edges (MMGCN); init 1.0 = no-op start.
+            if getattr(args, 'gcn_ii', False):
+                h = int(getattr(args, 'gcn_ii_hidden', 256))
+                L = int(getattr(args, 'gcn_ii_layers', 4))
+                self.ii_alpha = float(getattr(args, 'gcn_ii_alpha', 0.1))
+                self.ii_eta = float(getattr(args, 'gcn_ii_eta', 0.5))
+                self.ii_in = nn.Linear(input_dim, h)
+                self.ii_w = nn.ModuleList([nn.Linear(h, h, bias=False) for _ in range(L)])
+                self.ii_head = nn.Linear(h, output_dim)
+                self.ii_gamma = nn.Parameter(torch.tensor(1.0))
 
         # video-clip GCN (--gcn_video_local) uses the same temporal prior.
         if self.type == "local":
@@ -295,26 +320,51 @@ class GCN(nn.Module):
             if getattr(self.args, 'gcn_temporal_adj', False) and node_time_pos is not None:
                 temporal_weight = self._compute_temporal_weight(node_time_pos, x.device)
 
-            adj = build_normalized_adj(
-                x, adj_mask,
-                eps=1e-3, self_loop=getattr(self.args, 'gcn_self_loop', 0.0),
-                keep_neg=True, temporal_weight=temporal_weight,
-            )
-            x1 = self.gcn1(x, adj)
-            x1 = F.gelu(x1)
-            x1 = self.gcn1_norm(x1)
-            x1 = 0.5 * x1 + 0.5 * x
-            x1 = self.gcn2(x1, adj)
+            if getattr(self.args, 'gcn_ii', False):
+                # GCNII on the joint graph: angular-similarity adjacency with a
+                # learnable cross-modal scale gamma, self-loop, temporal prior.
+                x_ln = F.layer_norm(x, (D,))
+                cross = torch.zeros(N, N, device=x.device)
+                cross[:K_v, K_v:] = 1.0          # video -> eeg/region
+                cross[K_v:, :K_v] = 1.0          # eeg/region -> video
+                edge_scale = 1.0 + (self.ii_gamma - 1.0) * cross
+                adj = build_normalized_adj(
+                    x_ln, adj_mask, eps=1e-3, self_loop=1.0, angular=True,
+                    temporal_weight=temporal_weight, edge_scale=edge_scale,
+                )
+                H0 = self.ii_in(x_ln)
+                H = H0
+                for l, wl in enumerate(self.ii_w):
+                    beta = math.log(self.ii_eta / (l + 1) + 1.0)
+                    PH = torch.bmm(adj, H)
+                    tmp = (1.0 - self.ii_alpha) * PH + self.ii_alpha * H0
+                    H = (1.0 - beta) * tmp + beta * wl(tmp)   # (1-b)I + bW
+                    H = F.gelu(H)
+                g1 = H[:, :K_v, :].mean(dim=1) if K_v > 1 else H[:, 0, :]
+                g2 = H[:, K_v:K_v + K_e, :].mean(dim=1) if K_e > 1 else H[:, K_v, :]
+                global_f1 = self.ii_head(g1)
+                global_f2 = self.ii_head(g2)
+            else:
+                adj = build_normalized_adj(
+                    x, adj_mask,
+                    eps=1e-3, self_loop=getattr(self.args, 'gcn_self_loop', 0.0),
+                    keep_neg=True, temporal_weight=temporal_weight,
+                )
+                x1 = self.gcn1(x, adj)
+                x1 = F.gelu(x1)
+                x1 = self.gcn1_norm(x1)
+                x1 = 0.5 * x1 + 0.5 * x
+                x1 = self.gcn2(x1, adj)
 
-            # Pool post-GCN nodes per modality: video=global_f1, eeg=global_f2.
-            if K_v > 1:
-                global_f1 = x1[:, :K_v, :].mean(dim=1)
-            else:
-                global_f1 = x1[:, 0, :]
-            if K_e > 1:
-                global_f2 = x1[:, K_v:K_v + K_e, :].mean(dim=1)
-            else:
-                global_f2 = x1[:, K_v, :]
+                # Pool post-GCN nodes per modality: video=global_f1, eeg=global_f2.
+                if K_v > 1:
+                    global_f1 = x1[:, :K_v, :].mean(dim=1)
+                else:
+                    global_f1 = x1[:, 0, :]
+                if K_e > 1:
+                    global_f2 = x1[:, K_v:K_v + K_e, :].mean(dim=1)
+                else:
+                    global_f2 = x1[:, K_v, :]
 
             if getattr(self.args, 'fusion_gate_adaptive', False):
                 w = 0.5 + self.gate_beta * torch.tanh(

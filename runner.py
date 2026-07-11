@@ -1179,6 +1179,17 @@ if "__main__" == __name__:
                         help='Pin the fusion gate video-share to a CONSTANT (non-learnable) value, '
                              'e.g. 0.65 = video 65%% / eeg 35%%. Counters modality imbalance by giving '
                              'the chosen modality a fixed gradient share. arg-gated, default-off.')
+    parser.add_argument('--gcn_ii', action='store_true', default=False,
+                        help='GCNII propagation (Chen ICML2020 / MMGCN) on the joint video-eeg '
+                             'graph: bounded initial-residual identity preservation + deep '
+                             'oversmoothing-free message passing + learnable cross-modal edge '
+                             'scale (angular similarity). Off by default -> base untouched.')
+    parser.add_argument('--gcn_ii_layers', type=int, default=4)
+    parser.add_argument('--gcn_ii_hidden', type=int, default=256)
+    parser.add_argument('--gcn_ii_alpha', type=float, default=0.1,
+                        help='GCNII initial-residual strength to H^(0) (identity preservation).')
+    parser.add_argument('--gcn_ii_eta', type=float, default=0.5,
+                        help='GCNII identity-mapping decay: beta_l = log(eta/l + 1).')
     parser.add_argument('--gcn_self_loop', type=float, default=0.0,
                         help='Self-loop weight in the joint-graph adjacency (A + s*I). Default 0 '
                              'drops node self-identity so gcn2 outputs are pure neighbor aggregates '
