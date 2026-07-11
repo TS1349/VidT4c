@@ -274,6 +274,14 @@ class GCN(nn.Module):
             K_v = max(1, int(num_video_nodes))
             K_e = max(1, int(num_eeg_nodes))
 
+            # With a self-loop, gcn2 keeps each node's own feature instead of
+            # averaging it over neighbors; the raw residual then carries large
+            # backbone magnitudes straight into the logits and blows them up on
+            # big clip graphs. Normalize node scale first (param-free, cosine adj
+            # unchanged) so self-loop is stable. Off by default -> base untouched.
+            if getattr(self.args, 'gcn_self_loop', 0.0) > 0:
+                x = F.layer_norm(x, (D,))
+
             adj_mask = self.compute_region_adj(
                 N, x.device,
                 proto_dim_sizes=proto_dim_sizes,

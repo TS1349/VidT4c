@@ -27,7 +27,7 @@ BASE_FLAGS="--fusion naive --eeg_signal --eeg_backbone cbramod \
 --epochs 100 --patience 40 --pretrained --checkpoint_dir ./checkpoints_clip \
 --num_gpus 3 --batch_size 4"
 
-EPS_LIST="0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9"
+EPS_LIST="0.3 0.4 0.5 0.6 0.7"
 
 gen() {  # $1=name $2=video_backbone $3=dataset $4=method_flags
   local name=$1 vid=$2 ds=$3 mflags=$4
@@ -74,7 +74,9 @@ for vid in VideoMAE AdaMAE; do
 done
 
 # 2) AdaMAE self-loop — rest identical to base (learnable gate), both datasets.
-gen "selfloop_adamae" AdaMAE emognition "--gcn_self_loop 1.0"
+# self_loop>0 adds a param-free feature layer-norm inside the region GCN for
+# stability; emog's large clip graph also needs grad clipping (mdmer already clips).
+gen "selfloop_adamae" AdaMAE emognition "--gcn_self_loop 1.0 --grad_clip 0.5"
 gen "selfloop_adamae" AdaMAE mdmer      "--gcn_self_loop 1.0"
 
 # submit-all helper
