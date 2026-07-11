@@ -138,20 +138,19 @@ class GCN(nn.Module):
             else:
                 self.weight = nn.Parameter(torch.full((output_dim,), -1.0))
 
+            # --fusion_gate_adaptive: per-sample video-share bounded around 0.5,
+            # w = 0.5 + beta*tanh(mlp([video_logit, eeg_logit])). Bounding keeps it
+            # near 0.5 so it cannot collapse to the EEG-dominant corner.
+            if getattr(args, 'fusion_gate_adaptive', False):
+                self.gate_beta = float(getattr(args, 'fusion_gate_beta', 0.3))
+                self.gate_mlp = nn.Sequential(
+                    nn.Linear(output_dim * 2, output_dim), nn.GELU(),
+                    nn.Linear(output_dim, output_dim))
+                nn.init.zeros_(self.gate_mlp[-1].weight)
+                nn.init.zeros_(self.gate_mlp[-1].bias)
+
             # Learnable Gaussian std (log space) for --gcn_temporal_adj prior.
             self.log_sigma = nn.Parameter(torch.log(torch.tensor(3.0)))
-
-            # --fusion_gat: learn edge weights via GAT attention instead of cosine.
-            if getattr(args, 'fusion_gat', False):
-                self.gat_proj = nn.Linear(input_dim, input_dim)
-                self.gat_src = nn.Linear(input_dim, 1)
-                self.gat_dst = nn.Linear(input_dim, 1)
-            # --fusion_crossattn: learn cross-modal mixing via node self-attention.
-            if getattr(args, 'fusion_crossattn', False):
-                self.cross_tf = nn.TransformerEncoderLayer(
-                    d_model=input_dim, nhead=4, dim_feedforward=input_dim * 2,
-                    dropout=0.1, batch_first=True)
-                self.cross_head = nn.Linear(input_dim, output_dim)
 
         # video-clip GCN (--gcn_video_local) uses the same temporal prior.
         if self.type == "local":
@@ -253,16 +252,6 @@ class GCN(nn.Module):
         # Non-temporal pairs (region-anything): weight 1.0 → no modulation.
         return torch.where(both_time, gauss, torch.ones_like(gauss))
 
-    def _gat_adj(self, x, adj_mask, temporal_weight=None):
-        Wh = self.gat_proj(x)
-        e = self.gat_src(Wh) + self.gat_dst(Wh).transpose(1, 2)   # [B,N,N]
-        e = F.leaky_relu(e, 0.2)
-        if temporal_weight is not None:
-            e = e + torch.log(temporal_weight.unsqueeze(0).clamp_min(1e-6))
-        e = e.masked_fill(~adj_mask.bool().unsqueeze(0), float('-inf'))
-        A = torch.softmax(e, dim=-1)
-        return torch.nan_to_num(A, nan=0.0)
-
     def forward(self, x, region_indices=None, proto_dim_sizes=(),
                 num_video_nodes=1, num_eeg_nodes=1, node_time_pos=None):
         if self.type == "local":
@@ -298,23 +287,16 @@ class GCN(nn.Module):
             if getattr(self.args, 'gcn_temporal_adj', False) and node_time_pos is not None:
                 temporal_weight = self._compute_temporal_weight(node_time_pos, x.device)
 
-            if getattr(self.args, 'fusion_crossattn', False):
-                x1 = self.cross_tf(x)
-                x1 = self.cross_head(x1)
-            else:
-                if getattr(self.args, 'fusion_gat', False):
-                    adj = self._gat_adj(x, adj_mask, temporal_weight)
-                else:
-                    adj = build_normalized_adj(
-                        x, adj_mask,
-                        eps=1e-3, self_loop=0.0, keep_neg=True,
-                        temporal_weight=temporal_weight,
-                    )
-                x1 = self.gcn1(x, adj)
-                x1 = F.gelu(x1)
-                x1 = self.gcn1_norm(x1)
-                x1 = 0.5 * x1 + 0.5 * x
-                x1 = self.gcn2(x1, adj)
+            adj = build_normalized_adj(
+                x, adj_mask,
+                eps=1e-3, self_loop=getattr(self.args, 'gcn_self_loop', 0.0),
+                keep_neg=True, temporal_weight=temporal_weight,
+            )
+            x1 = self.gcn1(x, adj)
+            x1 = F.gelu(x1)
+            x1 = self.gcn1_norm(x1)
+            x1 = 0.5 * x1 + 0.5 * x
+            x1 = self.gcn2(x1, adj)
 
             # Pool post-GCN nodes per modality: video=global_f1, eeg=global_f2.
             if K_v > 1:
@@ -326,7 +308,11 @@ class GCN(nn.Module):
             else:
                 global_f2 = x1[:, K_v, :]
 
-            w = torch.sigmoid(self.weight)                        # [D_out] (static)
+            if getattr(self.args, 'fusion_gate_adaptive', False):
+                w = 0.5 + self.gate_beta * torch.tanh(
+                    self.gate_mlp(torch.cat([global_f1, global_f2], dim=-1)))
+            else:
+                w = torch.sigmoid(self.weight)                    # [D_out] (static)
             out = (1 - w) * global_f2 + w * global_f1
 
             return out  # [B, D_out]
@@ -486,12 +472,6 @@ class VEMT(nn.Module):
                 self.gcn_local = GCN(args, input_dim=self.embed_dim, output_dim=self.embed_dim, type= "local")
                 self.gcn_region = GCN(args, input_dim=self.embed_dim, output_dim=self.num_classes, type = "region")
                 self.region_pool = RegionalAttentionPool(d_model=self.embed_dim)
-                # --fusion_misa: shared/private decomposition of the two modalities.
-                if getattr(args, 'fusion_misa', False):
-                    self.misa_shared = nn.Linear(self.embed_dim, self.embed_dim)
-                    self.misa_priv_v = nn.Linear(self.embed_dim, self.embed_dim)
-                    self.misa_priv_e = nn.Linear(self.embed_dim, self.embed_dim)
-                    self.misa_head = nn.Linear(self.embed_dim * 4, self.num_classes)
                 # --gcn_video_local: refine video clip nodes among themselves before
                 # the joint graph (mirrors gcn_local for EEG channels).
                 if getattr(args, 'gcn_video_local', False):
@@ -1102,29 +1082,6 @@ class VEMT(nn.Module):
         logit, feat = self._pool_clips(feat_flat, logit_flat, B, K, modality='eeg')
         return logit, feat
 
-    @staticmethod
-    def _orth(a, b):
-        a = F.normalize(a, dim=-1)
-        b = F.normalize(b, dim=-1)
-        return (a * b).sum(dim=-1).pow(2).mean()
-
-    def _misa_fuse(self, v_nodes, e_nodes, eeg_region):
-        vv = v_nodes.mean(dim=1)
-        ee = torch.cat([e_nodes, eeg_region], dim=1).mean(dim=1)
-        # one call each (stacked) so the shared encoder/decoder is not reused in a
-        # single backward (keeps DDP's reducer happy without static_graph).
-        shared = self.misa_shared(torch.stack([vv, ee], dim=1))   # [B, 2, D]
-        sv, se = shared[:, 0], shared[:, 1]
-        pv, pe = self.misa_priv_v(vv), self.misa_priv_e(ee)
-        out = self.misa_head(torch.cat([sv, se, pv, pe], dim=-1))
-        if self.training:
-            sim = F.mse_loss(sv, se)
-            diff = self._orth(sv, pv) + self._orth(se, pe)
-            self._fusion_aux = sim + 0.3 * diff
-        else:
-            self._fusion_aux = None
-        return out
-
     def forward(self, x):
         eeg = x["eeg"]
         video = x["video"].transpose_(-3, -4)
@@ -1376,15 +1333,12 @@ class VEMT(nn.Module):
                         num_eeg_nodes, device=all_nodes.device,
                     )
 
-                if getattr(self.args, 'fusion_misa', False):
-                    output = self._misa_fuse(v_clip_nodes, e_clip_nodes, eeg_region)
-                else:
-                    output = self.gcn_region(
-                        all_nodes,
-                        num_video_nodes=num_video_nodes,
-                        num_eeg_nodes=num_eeg_nodes,
-                        node_time_pos=_node_t,
-                    )
+                output = self.gcn_region(
+                    all_nodes,
+                    num_video_nodes=num_video_nodes,
+                    num_eeg_nodes=num_eeg_nodes,
+                    node_time_pos=_node_t,
+                )
 
             else:
                 fused_f = F.normalize(fused_f, dim=-1)

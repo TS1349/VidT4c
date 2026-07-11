@@ -190,11 +190,6 @@ class PTrainer:
 
             combined = (1-self.w_ce) * focal_va + self.w_ce * ce_va
 
-            _inner = self.model.module if hasattr(self.model, 'module') else self.model
-            _fusion_aux = getattr(_inner, '_fusion_aux', None)
-            if _fusion_aux is not None:
-                combined = combined + _fusion_aux
-
             # Per-clip auxiliary loss (set_video_only K-clip path only).
             if self.per_clip_aux_loss_w > 0.0 and per_clip_logits is not None:
                 if per_clip_logits.dim() == 4 and per_clip_logits.size(-1) == 2:

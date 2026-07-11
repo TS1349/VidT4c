@@ -1179,12 +1179,15 @@ if "__main__" == __name__:
                         help='Pin the fusion gate video-share to a CONSTANT (non-learnable) value, '
                              'e.g. 0.65 = video 65%% / eeg 35%%. Counters modality imbalance by giving '
                              'the chosen modality a fixed gradient share. arg-gated, default-off.')
-    parser.add_argument('--fusion_gat', action='store_true', default=False,
-                        help='Joint-graph edges from GAT attention instead of cosine similarity.')
-    parser.add_argument('--fusion_crossattn', action='store_true', default=False,
-                        help='Replace joint-graph message passing with node self-attention (transformer).')
-    parser.add_argument('--fusion_misa', action='store_true', default=False,
-                        help='Shared/private modality decomposition (MISA) with similarity/difference/recon aux.')
+    parser.add_argument('--gcn_self_loop', type=float, default=0.0,
+                        help='Self-loop weight in the joint-graph adjacency (A + s*I). Default 0 '
+                             'drops node self-identity so gcn2 outputs are pure neighbor aggregates '
+                             '(video logit becomes eeg-neighbor dominated). 1.0 restores identity.')
+    parser.add_argument('--fusion_gate_adaptive', action='store_true', default=False,
+                        help='Per-sample fusion gate bounded around 0.5: w=0.5+beta*tanh(mlp). '
+                             'Sample-adaptive but cannot collapse to the dominant modality.')
+    parser.add_argument('--fusion_gate_beta', type=float, default=0.3,
+                        help='--fusion_gate_adaptive band half-width (w in [0.5-beta, 0.5+beta]).')
     parser.add_argument('--gcn_region_eeg_source', type=str, default='stft',
                         choices=('stft', 'cbramod'),
                         help='Per-channel EEG feature source for the GCN region nodes. '
