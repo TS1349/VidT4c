@@ -51,13 +51,18 @@ SL
   echo "eav_${name}.slurm"
 }
 
-# 1) video-favor gate sweep (video share p)
-for p in 0.6 0.7 0.8 0.9 0.95; do
+# 1) video-favor gate sweep (AdaMAE, video share p in 0.8..0.95)
+for p in 0.8 0.9 0.95; do
   ptag=$(echo "$p" | tr -d '.')
   gen "gate${ptag}" "--fusion_gate_fixed $p"
 done
-# 2) deep_fuse (principled fix for the eeg-skew: strong video branch contributes directly)
-gen "deepfuse" "--deep_fuse"
+# 2) deep_fuse for the video backbones not yet run in fusion (AdaMAE already done);
+#    each strong video branch contributes directly, bypassing the eeg gradient/gate
+#    skew. --vemt_video override wins over the base AdaMAE.
+for vid in VideoMAE ViViT TSF Swin; do
+  vtag=$(echo "$vid" | tr 'A-Z' 'a-z')
+  gen "deepfuse_${vtag}" "--vemt_video $vid --deep_fuse"
+done
 
 cat > submit_all.sh <<'SUB'
 #!/bin/bash
