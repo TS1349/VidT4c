@@ -340,8 +340,18 @@ class GCN(nn.Module):
                     tmp = (1.0 - self.ii_alpha) * PH + self.ii_alpha * H0
                     H = (1.0 - beta) * tmp + beta * wl(tmp)   # (1-b)I + bW
                     H = F.gelu(H)
+                if getattr(self.args, 'dump_affinity', False):
+                    self._dump_adj = adj.detach()      # [B,N,N] angular+gamma adjacency
+                    self._dump_H = H.detach()          # [B,N,hidden] final propagated nodes
                 g1 = H[:, :K_v, :].mean(dim=1) if K_v > 1 else H[:, 0, :]
                 g2 = H[:, K_v:K_v + K_e, :].mean(dim=1) if K_e > 1 else H[:, K_v, :]
+                # Decorrelation: the dump showed video/eeg node features collapse
+                # (cos~0.92) after propagation, leaving nothing to fuse. Penalize
+                # their similarity so the two streams stay distinct. g1/g2 are on
+                # the main path (no DDP unreachable-param issue).
+                _dw = float(getattr(self.args, 'gcn_ii_decorr', 0.0))
+                if _dw > 0 and self.training:
+                    self._fusion_aux = _dw * F.cosine_similarity(g1, g2, dim=-1).pow(2).mean()
                 global_f1 = self.ii_head(g1)
                 global_f2 = self.ii_head(g2)
             else:
@@ -350,10 +360,21 @@ class GCN(nn.Module):
                     eps=1e-3, self_loop=getattr(self.args, 'gcn_self_loop', 0.0),
                     keep_neg=True, temporal_weight=temporal_weight,
                 )
-                x1 = self.gcn1(x, adj)
+                # --gcn_dropout: regularize the scratch GCN against overfitting
+                # (mdmer memorizes ~300 samples by ep0). Drops node features into
+                # each layer; adjacency stays clean. Off by default -> base unchanged.
+                _dp = float(getattr(self.args, 'gcn_dropout', 0.0))
+                h = F.dropout(x, _dp, self.training) if _dp > 0 else x
+                x1 = self.gcn1(h, adj)
                 x1 = F.gelu(x1)
                 x1 = self.gcn1_norm(x1)
                 x1 = 0.5 * x1 + 0.5 * x
+                if getattr(self.args, 'dump_affinity', False):
+                    self._dump_adj = adj.detach()      # [B,N,N]
+                    self._dump_H = x1.detach()         # post-gcn1 768-d node features
+                    self._dump_Hpre = x.detach()       # pre-GCN node features
+                if _dp > 0:
+                    x1 = F.dropout(x1, _dp, self.training)
                 x1 = self.gcn2(x1, adj)
 
                 # Pool post-GCN nodes per modality: video=global_f1, eeg=global_f2.
@@ -530,6 +551,13 @@ class VEMT(nn.Module):
                 self.gcn_local = GCN(args, input_dim=self.embed_dim, output_dim=self.embed_dim, type= "local")
                 self.gcn_region = GCN(args, input_dim=self.embed_dim, output_dim=self.num_classes, type = "region")
                 self.region_pool = RegionalAttentionPool(d_model=self.embed_dim)
+                # --deep_fuse: stage-1 per-modality classifier heads (video clip
+                # branch + EEG region branch). The joint GCN keeps its own logit;
+                # final = 0.25*video + 0.25*eeg + 0.5*fused with deep supervision.
+                if getattr(args, 'deep_fuse', False):
+                    self.df_video_head = nn.Linear(self.embed_dim, self.num_classes)
+                    self.df_eeg_head = nn.Linear(self.embed_dim, self.num_classes)
+                    self.deep_fuse_w = float(getattr(args, 'deep_fuse_w', 0.5))
                 # --gcn_video_local: refine video clip nodes among themselves before
                 # the joint graph (mirrors gcn_local for EEG channels).
                 if getattr(args, 'gcn_video_local', False):
@@ -1397,6 +1425,17 @@ class VEMT(nn.Module):
                     num_eeg_nodes=num_eeg_nodes,
                     node_time_pos=_node_t,
                 )
+
+                if getattr(self.args, 'deep_fuse', False):
+                    # Stage-1 branch logits (before the joint graph collapses the
+                    # modalities): pool the video clip nodes and the EEG region
+                    # nodes to one vector each, classify separately, then combine
+                    # with the joint (fused) logit 0.25/0.25/0.5.
+                    fused_logit = output
+                    video_logit = self.df_video_head(v_clip_nodes.mean(dim=1))
+                    eeg_logit = self.df_eeg_head(eeg_region.mean(dim=1))
+                    output = 0.25 * video_logit + 0.25 * eeg_logit + 0.5 * fused_logit
+                    self._deep_fuse_branches = (video_logit, eeg_logit, fused_logit)
 
             else:
                 fused_f = F.normalize(fused_f, dim=-1)

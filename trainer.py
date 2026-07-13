@@ -214,6 +214,25 @@ class PTrainer:
                         f"final_combined={combined.item():.4f}"
                     )
 
+            # GCNII decorrelation aux (stashed on the model during forward).
+            _inner = self.model.module if hasattr(self.model, 'module') else self.model
+            _faux = getattr(getattr(_inner, 'gcn_region', None), '_fusion_aux', None)
+            if _faux is not None:
+                combined = combined + _faux
+
+            # --deep_fuse: auxiliary supervision on each stage logit (video branch,
+            # eeg branch, fused). Branches are stashed as [B, 2C]; split into V/A.
+            _dfb = getattr(_inner, '_deep_fuse_branches', None)
+            if _dfb is not None and output.dim() == 3:
+                _dfw = float(getattr(_inner, 'deep_fuse_w', 0.5))
+                _C = output.size(1)
+                _df_aux = 0.0
+                for _bl in _dfb:
+                    _df_aux = _df_aux + 0.5 * (
+                        self.loss_function(_bl[:, :_C].float(), target[:, 0])
+                        + self.loss_function(_bl[:, _C:].float(), target[:, 1]))
+                combined = combined + _dfw * _df_aux
+
             loss = combined
             loss.backward()
             if self.grad_clip > 0:
@@ -615,13 +634,25 @@ class PTrainer:
                 if torch.is_tensor(out):
                     _cap['alpha'] = torch.sigmoid(out.detach()).squeeze(-1)  # [B, R]
 
+            # GCNII bypasses gcn1, stashing adj/H on the module instead.
+            def _post_region(mod, args, kwargs, out):
+                if hasattr(mod, '_dump_adj'):
+                    _cap['adj'] = mod._dump_adj
+                if hasattr(mod, '_dump_H'):
+                    _cap['H'] = mod._dump_H
+                if hasattr(mod, '_dump_Hpre'):
+                    _cap['Hpre'] = mod._dump_Hpre
+
             if _greg is not None and hasattr(_greg, 'gcn1'):
                 _hooks.append(_greg.gcn1.register_forward_pre_hook(_pre_gcn1))
                 _hooks.append(_greg.register_forward_pre_hook(_pre_region, with_kwargs=True))
+                _hooks.append(_greg.register_forward_hook(_post_region, with_kwargs=True))
                 if hasattr(_inner, 'region_gate_mlp'):
                     _hooks.append(_inner.region_gate_mlp.register_forward_hook(_post_alpha))
                 _cap['gate_w'] = (float(torch.sigmoid(_greg.weight.detach()).mean().item())
                                   if hasattr(_greg, 'weight') else None)
+                _cap['ii_gamma'] = (float(_greg.ii_gamma.detach().item())
+                                    if hasattr(_greg, 'ii_gamma') else None)
 
         num_batches = len(self.validation_dataloader)
         pbar = tqdm(total=num_batches, desc=f"Test-{model_name}", disable=not self.is_main)
@@ -711,6 +742,24 @@ class PTrainer:
                                     arow["region_to_eeg"] = a[rs, es].mean(-1).detach().cpu().tolist()
                                 if 'alpha' in _cap and _cap['alpha'].dim() >= 2 and i < _cap['alpha'].size(0):
                                     arow["region_alpha"] = _cap['alpha'][i].detach().cpu().tolist()
+                                if _cap.get('ii_gamma') is not None:
+                                    arow["ii_gamma"] = _cap['ii_gamma']
+                                # Oversmoothing (all-node sim ~1) + cross-modal feature
+                                # collapse (video-mean vs eeg-mean sim ~1). Computed on the
+                                # graph-output features (H) and, for the base path, also on
+                                # the pre-GCN inputs (Hpre) to see the collapse happen.
+                                def _feat_stats(feat_i):
+                                    Hn = torch.nn.functional.normalize(feat_i, dim=-1)
+                                    Nn = feat_i.size(0)
+                                    sim = Hn @ Hn.t()
+                                    off = (sim.sum() - Nn) / max(1, Nn * Nn - Nn)
+                                    ve = torch.nn.functional.cosine_similarity(
+                                        Hn[vs].mean(0).unsqueeze(0), Hn[es].mean(0).unsqueeze(0))
+                                    return float(off.item()), float(ve.item())
+                                if 'H' in _cap and i < _cap['H'].size(0):
+                                    arow["H_node_sim"], arow["H_ve_sim"] = _feat_stats(_cap['H'][i])
+                                if 'Hpre' in _cap and i < _cap['Hpre'].size(0):
+                                    arow["Hpre_node_sim"], arow["Hpre_ve_sim"] = _feat_stats(_cap['Hpre'][i])
                                 _affin_rows.append(arow)
 
                 elif preds.dim() == 2:

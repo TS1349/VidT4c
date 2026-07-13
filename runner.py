@@ -1190,6 +1190,20 @@ if "__main__" == __name__:
                         help='GCNII initial-residual strength to H^(0) (identity preservation).')
     parser.add_argument('--gcn_ii_eta', type=float, default=0.5,
                         help='GCNII identity-mapping decay: beta_l = log(eta/l + 1).')
+    parser.add_argument('--gcn_dropout', type=float, default=0.0,
+                        help='Dropout on GCN node features (into each layer) to fight fusion '
+                             'overfitting. 0 = off (base unchanged).')
+    parser.add_argument('--deep_fuse', action='store_true', default=False,
+                        help='3-stage deep-supervised hierarchical fusion: separate logits from '
+                             'the video clip-GCN branch and the EEG region branch (stage 1) plus '
+                             'the inter-modal joint GCN (stage 2), combined 0.25/0.25/0.5 with '
+                             'auxiliary supervision on each. Off by default -> base unchanged.')
+    parser.add_argument('--deep_fuse_w', type=float, default=0.5,
+                        help='Weight on the per-branch auxiliary CE for --deep_fuse.')
+    parser.add_argument('--gcn_ii_decorr', type=float, default=0.0,
+                        help='GCNII decorrelation aux-loss weight: penalize cos(video_pool, '
+                             'eeg_pool)^2 so the two modality streams do not collapse together '
+                             '(the dump showed cos~0.92 collapse). 0 = off.')
     parser.add_argument('--gcn_self_loop', type=float, default=0.0,
                         help='Self-loop weight in the joint-graph adjacency (A + s*I). Default 0 '
                              'drops node self-identity so gcn2 outputs are pure neighbor aggregates '
