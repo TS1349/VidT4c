@@ -558,6 +558,12 @@ class VEMT(nn.Module):
                     self.df_video_head = nn.Linear(self.embed_dim, self.num_classes)
                     self.df_eeg_head = nn.Linear(self.embed_dim, self.num_classes)
                     self.deep_fuse_w = float(getattr(args, 'deep_fuse_w', 0.5))
+                    if getattr(args, 'deep_fuse_learn_w', False):
+                        init_w = torch.log(torch.tensor([0.25, 0.25, 0.5]))
+                        self.df_logit_w = nn.Parameter(init_w.view(3, 1).repeat(1, self.num_classes))
+                    if getattr(args, 'deep_fuse_adapt_w', False):
+                        self.df_adapt = nn.Sequential(
+                            nn.Linear(3 * self.num_classes, 64), nn.GELU(), nn.Linear(64, 3))
                 # --gcn_video_local: refine video clip nodes among themselves before
                 # the joint graph (mirrors gcn_local for EEG channels).
                 if getattr(args, 'gcn_video_local', False):
@@ -679,6 +685,10 @@ class VEMT(nn.Module):
             "classifier",  # VEMT classifier when gcn=False
             "film",
             "cross_attn",
+            "df_video_head",   # --deep_fuse stage-1 branch heads
+            "df_eeg_head",
+            "df_adapt",
+            "gcn_video_local",
         ]
 
         for module_name in head_module_names:
@@ -686,6 +696,9 @@ class VEMT(nn.Module):
                 module = getattr(self, module_name)
                 for p in module.parameters():
                     p.requires_grad = True
+
+        if hasattr(self, "df_logit_w"):
+            self.df_logit_w.requires_grad = True
 
     def init_weights_classify(self, module):
         if isinstance(module, (nn.Linear, nn.Embedding)):
@@ -898,7 +911,7 @@ class VEMT(nn.Module):
             getattr(self.args, 'dense_cache_features', False)
             and sample_idxs is not None
             and has_split_api
-            and n_trainable > 0
+            and n_trainable >= 0
         )
         n_blocks = len(getattr(self.video_model, 'blocks', [])) if has_split_api else 0
         split = (n_blocks - n_trainable) if has_split_api else 0
@@ -1434,7 +1447,16 @@ class VEMT(nn.Module):
                     fused_logit = output
                     video_logit = self.df_video_head(v_clip_nodes.mean(dim=1))
                     eeg_logit = self.df_eeg_head(eeg_region.mean(dim=1))
-                    output = 0.25 * video_logit + 0.25 * eeg_logit + 0.5 * fused_logit
+                    if getattr(self.args, 'deep_fuse_adapt_w', False):
+                        w = torch.softmax(
+                            self.df_adapt(torch.cat([video_logit, eeg_logit, fused_logit], dim=-1)), dim=-1)
+                        output = (w[:, 0:1] * video_logit + w[:, 1:2] * eeg_logit
+                                  + w[:, 2:3] * fused_logit)
+                    elif getattr(self.args, 'deep_fuse_learn_w', False):
+                        w = torch.softmax(self.df_logit_w, dim=0)
+                        output = w[0] * video_logit + w[1] * eeg_logit + w[2] * fused_logit
+                    else:
+                        output = 0.25 * video_logit + 0.25 * eeg_logit + 0.5 * fused_logit
                     self._deep_fuse_branches = (video_logit, eeg_logit, fused_logit)
 
             else:

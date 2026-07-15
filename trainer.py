@@ -220,18 +220,28 @@ class PTrainer:
             if _faux is not None:
                 combined = combined + _faux
 
-            # --deep_fuse: auxiliary supervision on each stage logit (video branch,
-            # eeg branch, fused). Branches are stashed as [B, 2C]; split into V/A.
+            # --deep_fuse: deep supervision on the three stage logits (video branch,
+            # eeg branch, fused), REPLACING the main loss. Weights 0.25/0.25/0.5
+            # match the logit combination and SUM TO 1 (no over-weighted aux, which
+            # otherwise made the loss 2.5x and drove fast overfitting).
             _dfb = getattr(_inner, '_deep_fuse_branches', None)
             if _dfb is not None and output.dim() == 3:
-                _dfw = float(getattr(_inner, 'deep_fuse_w', 0.5))
                 _C = output.size(1)
-                _df_aux = 0.0
-                for _bl in _dfb:
-                    _df_aux = _df_aux + 0.5 * (
-                        self.loss_function(_bl[:, :_C].float(), target[:, 0])
-                        + self.loss_function(_bl[:, _C:].float(), target[:, 1]))
-                combined = combined + _dfw * _df_aux
+
+                def _branch_loss(_bl):
+                    _v = _bl[:, :_C].float(); _a = _bl[:, _C:].float()
+                    _ce = 0.5 * (self.ce_val(_v, target[:, 0]) + self.ce_aro(_a, target[:, 1]))
+                    _foc = 0.5 * (self.loss_function(_v, target[:, 0]) + self.loss_function(_a, target[:, 1]))
+                    return (1 - self.w_ce) * _foc + self.w_ce * _ce
+
+                _args = _inner.args
+                if getattr(_args, 'deep_fuse_learn_w', False) or getattr(_args, 'deep_fuse_adapt_w', False):
+                    # keep the main CE+focal on the fused output, add lighter deep supervision
+                    _w = (0.1, 0.1, 0.2)  # video, eeg, fused
+                    combined = combined + sum(wi * _branch_loss(bl) for wi, bl in zip(_w, _dfb))
+                else:
+                    _w = (0.25, 0.25, 0.5)  # video, eeg, fused
+                    combined = sum(wi * _branch_loss(bl) for wi, bl in zip(_w, _dfb))
 
             loss = combined
             loss.backward()

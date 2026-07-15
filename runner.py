@@ -630,6 +630,24 @@ def run(
                     f"{_v_msg}; {_e_msg}."
                 )
 
+        # --video_init_ckpt / --eeg_init_ckpt: load unimodal fine-tuned backbone
+        # weights before caching/training so the (frozen) fusion starts from
+        # dataset-adapted features instead of generic pretrained ones.
+        def _load_modality_init(_m, _path, _prefix):
+            if not _path or not os.path.isfile(_path):
+                if _path and rank == 0:
+                    print(f"[init_ckpt][WARN] {_prefix} ckpt not found: {_path}")
+                return
+            _sd = torch.load(_path, map_location='cpu')
+            if isinstance(_sd, dict):
+                _sd = _sd.get('model', _sd.get('module', _sd.get('state_dict', _sd)))
+            _filt = {k: v for k, v in _sd.items() if k.startswith(_prefix)}
+            _miss, _unexp = _m.load_state_dict(_filt, strict=False)
+            if rank == 0:
+                print(f"[init_ckpt] loaded {len(_filt)} '{_prefix}' params from {_path}")
+        _load_modality_init(model, getattr(args, 'video_init_ckpt', ''), 'video_model.')
+        _load_modality_init(model, getattr(args, 'eeg_init_ckpt', ''), 'eeg_model.')
+
         # On-disk dense feature cache; dir auto-derived from dataset/csv/backbone/fi/
         # unfreeze split unless --dense_cache_dir is set.
         if _dense_cache_features and hasattr(model, 'setup_dense_cache'):
@@ -1200,6 +1218,21 @@ if "__main__" == __name__:
                              'auxiliary supervision on each. Off by default -> base unchanged.')
     parser.add_argument('--deep_fuse_w', type=float, default=0.5,
                         help='Weight on the per-branch auxiliary CE for --deep_fuse.')
+    parser.add_argument('--deep_fuse_learn_w', action='store_true', default=False,
+                        help='Learn the video/eeg/fused combination weights (per-class softmax) '
+                             'instead of the fixed 0.25/0.25/0.5, and supervise the fused output '
+                             'with the main CE+focal loss plus lighter deep-supervision aux.')
+    parser.add_argument('--deep_fuse_adapt_w', action='store_true', default=False,
+                        help='Per-sample adaptive combination weights (small MLP over the three '
+                             'branch logits). Same main-loss / deep-supervision scheme as '
+                             '--deep_fuse_learn_w.')
+    parser.add_argument('--video_init_ckpt', type=str, default='',
+                        help='Load the video backbone weights from a unimodal (video-only) '
+                             'fine-tuned checkpoint before fusion training. With frozen backbones '
+                             '(video_unfreeze 0) the fusion trains on already-adapted features.')
+    parser.add_argument('--eeg_init_ckpt', type=str, default='',
+                        help='Load the EEG backbone weights from a unimodal (eeg-only) fine-tuned '
+                             'checkpoint before fusion training.')
     parser.add_argument('--gcn_ii_decorr', type=float, default=0.0,
                         help='GCNII decorrelation aux-loss weight: penalize cos(video_pool, '
                              'eeg_pool)^2 so the two modality streams do not collapse together '
