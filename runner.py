@@ -1246,6 +1246,28 @@ if "__main__" == __name__:
                              'Sample-adaptive but cannot collapse to the dominant modality.')
     parser.add_argument('--fusion_gate_beta', type=float, default=0.3,
                         help='--fusion_gate_adaptive band half-width (w in [0.5-beta, 0.5+beta]).')
+    parser.add_argument('--ve_gate', action='store_true', default=False,
+                        help='Shift the video/eeg fusion gate per-sample by the video-eeg '
+                             'agreement cos(video, eeg), which correlates with correctness. '
+                             'Starts at the base gate (zero-init). Off by default.')
+    parser.add_argument('--d2_align', action='store_true', default=False,
+                        help='Project all nodes into a shared space (identity-init) for the '
+                             'cross-modal adjacency, plus a video-eeg contrastive term, so the '
+                             'cross-modal graph edges carry gradient. Off by default.')
+    parser.add_argument('--d2_align_w', type=float, default=0.3,
+                        help='Weight of the --d2_align video-eeg contrastive loss.')
+    parser.add_argument('--d2_align_tau', type=float, default=0.1,
+                        help='Temperature of the --d2_align contrastive loss.')
+    parser.add_argument('--d2_gather', action='store_true', default=False,
+                        help='Gather video/eeg embeddings across GPUs for the --d2_align '
+                             'contrastive loss so each anchor sees the full batch as negatives.')
+    parser.add_argument('--video_aux_warmup', type=int, default=0,
+                        help='Warmup epochs for a direct CE+focal loss on the video readout, so '
+                             'the video backbone fine-tunes before the eeg-favored fusion gate '
+                             'throttles its gradient. Weight decays linearly to 0 over these '
+                             'epochs. 0 = off (base unchanged).')
+    parser.add_argument('--video_aux_w', type=float, default=1.0,
+                        help='Initial weight of the --video_aux_warmup video-branch loss.')
     parser.add_argument('--gcn_region_eeg_source', type=str, default='stft',
                         choices=('stft', 'cbramod'),
                         help='Per-channel EEG feature source for the GCN region nodes. '

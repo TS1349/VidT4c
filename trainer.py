@@ -220,6 +220,23 @@ class PTrainer:
             if _faux is not None:
                 combined = combined + _faux
 
+            # Direct warmup-decayed loss on the video readout so its gradient is not
+            # throttled by the fusion gate early in training.
+            _vw = int(getattr(_inner.args, 'video_aux_warmup', 0))
+            _vl = getattr(getattr(_inner, 'gcn_region', None), '_video_logit', None)
+            if _vw > 0 and _vl is not None:
+                _coef = float(getattr(_inner.args, 'video_aux_w', 1.0)) * max(0.0, 1.0 - self.current_epoch / _vw)
+                if _coef > 0:
+                    if output.dim() == 3:
+                        _C = output.size(1)
+                        _v = _vl[:, :_C].float(); _a = _vl[:, _C:].float()
+                        _ce = 0.5 * (self.ce_val(_v, target[:, 0]) + self.ce_aro(_a, target[:, 1]))
+                        _foc = 0.5 * (self.loss_function(_v, target[:, 0]) + self.loss_function(_a, target[:, 1]))
+                    else:
+                        _ce = self.ce_val(_vl.float(), target)
+                        _foc = self.loss_function(_vl.float(), target)
+                    combined = combined + _coef * ((1 - self.w_ce) * _foc + self.w_ce * _ce)
+
             # --deep_fuse: deep supervision on the three stage logits (video branch,
             # eeg branch, fused), REPLACING the main loss. Weights 0.25/0.25/0.5
             # match the logit combination and SUM TO 1 (no over-weighted aux, which

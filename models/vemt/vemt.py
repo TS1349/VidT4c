@@ -158,6 +158,19 @@ class GCN(nn.Module):
                 nn.init.zeros_(self.gate_mlp[-1].weight)
                 nn.init.zeros_(self.gate_mlp[-1].bias)
 
+            # Per-sample gate shift from the video-eeg agreement cos(video, eeg).
+            if getattr(args, 've_gate', False):
+                self.ve_gate = nn.Sequential(
+                    nn.Linear(1, 16), nn.GELU(), nn.Linear(16, output_dim))
+                nn.init.zeros_(self.ve_gate[-1].weight)
+                nn.init.zeros_(self.ve_gate[-1].bias)
+
+            # Shared projection for the cross-modal adjacency (identity-init).
+            if getattr(args, 'd2_align', False):
+                self.align_proj = nn.Linear(input_dim, input_dim)
+                nn.init.eye_(self.align_proj.weight)
+                nn.init.zeros_(self.align_proj.bias)
+
             # Learnable Gaussian std (log space) for --gcn_temporal_adj prior.
             self.log_sigma = nn.Parameter(torch.log(torch.tensor(3.0)))
 
@@ -355,14 +368,34 @@ class GCN(nn.Module):
                 global_f1 = self.ii_head(g1)
                 global_f2 = self.ii_head(g2)
             else:
+                _d2 = getattr(self.args, 'd2_align', False)
                 adj = build_normalized_adj(
-                    x, adj_mask,
+                    self.align_proj(x) if _d2 else x, adj_mask,
                     eps=1e-3, self_loop=getattr(self.args, 'gcn_self_loop', 0.0),
                     keep_neg=True, temporal_weight=temporal_weight,
                 )
-                # --gcn_dropout: regularize the scratch GCN against overfitting
-                # (mdmer memorizes ~300 samples by ep0). Drops node features into
-                # each layer; adjacency stays clean. Off by default -> base unchanged.
+                if _d2 and self.training:
+                    _vp = F.normalize(self.align_proj(x[:, :K_v, :].mean(dim=1)), dim=-1)
+                    _ep = F.normalize(self.align_proj(x[:, K_v, :]), dim=-1)
+                    _tau = float(getattr(self.args, 'd2_align_tau', 0.1))
+                    import torch.distributed as _d
+                    if (getattr(self.args, 'd2_gather', False) and _d.is_available()
+                            and _d.is_initialized() and _d.get_world_size() > 1):
+                        # gather negatives across GPUs, keep the local slot grad-connected
+                        def _gg(t):
+                            g = [torch.zeros_like(t) for _ in range(_d.get_world_size())]
+                            _d.all_gather(g, t.contiguous()); g[_d.get_rank()] = t
+                            return torch.cat(g, 0)
+                        _vp_all, _ep_all = _gg(_vp), _gg(_ep)
+                        _off = _d.get_rank() * _vp.size(0)
+                    else:
+                        _vp_all, _ep_all, _off = _vp, _ep, 0
+                    _lg1 = _vp @ _ep_all.t() / _tau
+                    _lg2 = _ep @ _vp_all.t() / _tau
+                    _lab = torch.arange(_vp.size(0), device=_vp.device) + _off
+                    _nce = 0.5 * (F.cross_entropy(_lg1, _lab) + F.cross_entropy(_lg2, _lab))
+                    self._fusion_aux = float(getattr(self.args, 'd2_align_w', 0.3)) * _nce
+                # Node-feature dropout into each GCN layer (adjacency stays clean).
                 _dp = float(getattr(self.args, 'gcn_dropout', 0.0))
                 h = F.dropout(x, _dp, self.training) if _dp > 0 else x
                 x1 = self.gcn1(h, adj)
@@ -387,7 +420,13 @@ class GCN(nn.Module):
                 else:
                     global_f2 = x1[:, K_v, :]
 
-            if getattr(self.args, 'fusion_gate_adaptive', False):
+                if getattr(self.args, 'video_aux_warmup', 0) > 0:
+                    self._video_logit = global_f1
+
+            if getattr(self.args, 've_gate', False):
+                agree = F.cosine_similarity(global_f1, global_f2, dim=-1).unsqueeze(-1)
+                w = torch.sigmoid(self.weight + self.ve_gate(agree))
+            elif getattr(self.args, 'fusion_gate_adaptive', False):
                 w = 0.5 + self.gate_beta * torch.tanh(
                     self.gate_mlp(torch.cat([global_f1, global_f2], dim=-1)))
             else:
