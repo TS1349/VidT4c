@@ -20,9 +20,9 @@ conda activate tsf-low
 set -x
 srun python -u runner.py \
     --model vemt --vemt_video TSF --set_video_only --fusion naive \
-    --dense_video_clips --frame_interval 2 --clip_pool mean \
+    --dense_video_clips --frame_interval 4 --clip_overlap_ratio 0.5 --clip_pool mean \
     --dense_chunk_size 6 --dense_cache_features --video_unfreeze_last_n_blocks 1 --fps_normalize \
     --learning_rate 2e-5 --weight_decay 0.02 \
     --epochs 100 --patience 15 --pretrained --checkpoint_dir ./checkpoints_clip \
     --num_gpus 3 --batch_size 4 --dataset eav --csv_file ./datasets/updated_fold_csv_files/EAV_fold_csv/EAV_dataset_updated_fold0.csv \
-    --experiment_name dense_fi2_1block-mean_tsf_eav_fold0_2e-5_0.02
+    --experiment_name dense_fi4-overlap_1block-mean_tsf_eav_fold0_2e-5_0.02
