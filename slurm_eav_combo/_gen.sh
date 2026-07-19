@@ -53,10 +53,12 @@ SL
 
 GATE="--fusion_gate_fixed 0.8"
 GATE_WARMUP="--fusion_gate_fixed 0.8 --video_aux_warmup 15 --video_aux_w 1.0"
+GATE_WARMUP_GCNLR="--fusion_gate_fixed 0.8 --video_aux_warmup 15 --video_aux_w 1.0 --gcn_learning_rate 5e-4"
 
 for vid in VideoMAE AdaMAE; do
-  gen "$vid" gate        "$GATE"
-  gen "$vid" gatewarmup  "$GATE_WARMUP"
+  gen "$vid" gate           "$GATE"
+  gen "$vid" gatewarmup     "$GATE_WARMUP"
+  gen "$vid" gatewarmupgcnlr "$GATE_WARMUP_GCNLR"
 done
 
 cat > submit_all.sh <<'SUB'
